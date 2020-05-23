@@ -1,7 +1,6 @@
-import time
 import logging
-import threading
-import zmq
+from threading import Thread, Event
+from time import time, sleep
 from zaber.serial import *
 from collections import OrderedDict
 
@@ -49,10 +48,9 @@ class ZaberXYStage:
 
         # Attributes related to scanning
         self.scan_params = {}  # Dict to hold relevant scan parameters
-        self.context = zmq.Context()  # ZMQ context for publishing data from self.scan_thread
-        self.stop_scan = threading.Event()  # Event to stop scan
-        self.finish_scan = threading.Event()  # Event to finish a scan after completing all rows of current iteration
-        self.no_beam = threading.Event()  # Event to wait if beam current is low of beam is shut off
+        self.stop_scan = Event()  # Event to stop scan
+        self.finish_scan = Event()  # Event to finish a scan after completing all rows of current iteration
+        self.no_beam = Event()  # Event to wait if beam current is low of beam is shut off
 
         # Units
         self.dist_units = OrderedDict([('mm', 1.0), ('cm', 1e1), ('m', 1e3)])
@@ -507,7 +505,7 @@ class ZaberXYStage:
 
         return _reply
 
-    def prepare_scan(self, rel_start_point, rel_end_point, scan_speed, step_size, tcp_address, server):
+    def prepare_scan(self, rel_start_point, rel_end_point, scan_speed, step_size, data_out, server):
         """
         Prepares a scan by storing all needed info in self.scan_params
 
@@ -521,8 +519,8 @@ class ZaberXYStage:
             horizontal scan speed in mm / s
         step_size : float
             stepp size of vertical steps in mm
-        tcp_address : str
-            tcp address to which data of stage is published during scan
+        data_out : zmq socket
+            Socket which published data to during scan
         server : str
             IP address of server which controls the stage
         """
@@ -543,7 +541,7 @@ class ZaberXYStage:
         # Store input args
         self.scan_params['speed'] = scan_speed
         self.scan_params['step_size'] = step_size
-        self.scan_params['tcp_address'] = tcp_address
+        self.scan_params['data_out'] = data_out
         self.scan_params['server'] = server
 
         # Calculate number of rows for the scan
@@ -574,7 +572,7 @@ class ZaberXYStage:
 
         # Check if scan_params dict contains all necessary info
         scan_reqs = ('origin', 'start_pos', 'end_pos', 'n_rows', 'rows',
-                     'speed', 'step_size', 'tcp_address', 'server')
+                     'speed', 'step_size', 'data_out', 'server')
         missed_reqs = [req for req in scan_reqs if req not in scan_params]
 
         # Return if info is missing
@@ -618,7 +616,7 @@ class ZaberXYStage:
             return
 
         # Start scan in separate thread
-        scan_thread = threading.Thread(target=self._scan_row, args=(row, speed, scan_params))
+        scan_thread = Thread(target=self._scan_row, args=(row, speed, scan_params))
         scan_thread.start()
 
     def scan_device(self, scan_params=None):
@@ -642,10 +640,10 @@ class ZaberXYStage:
             return
 
         # Start scan in separate thread
-        scan_thread = threading.Thread(target=self._scan_device, args=(scan_params, ))
+        scan_thread = Thread(target=self._scan_device, args=(scan_params, ))
         scan_thread.start()
 
-    def _scan_row(self, row, scan_params, speed=None, scan=-1, stage_pub=None):
+    def _scan_row(self, row, scan_params, speed=None, scan=-1, data_out=None):
         """
         Method which is called by self._scan_device or self.scan_row. See docstrings there.
 
@@ -659,16 +657,9 @@ class ZaberXYStage:
             Scan speed in mm/s or None. If None, current speed of x-axis is used for scanning
         scan : int
             Integer indicating the scan number during self.scan_device. *scan* for single rows is -1
-        stage_pub : zmq.PUB, None
-            Publisher socket on which to publish data. If None, open new one
+        data_out : zmq socket, None
+            Socket on which data is published. If None, no data is published
         """
-
-        # Check socket, if no socket is given, open one
-        socket_close = stage_pub is None
-        if stage_pub is None:
-            stage_pub = self.context.socket(zmq.PUB)
-            stage_pub.set_hwm(10)
-            stage_pub.bind(scan_params['tcp_address'])
 
         # Check whether this method is called from within self.scan_device or single row is scanned.
         # If single row is scanned, we're coming from
@@ -697,15 +688,16 @@ class ZaberXYStage:
             msg = "Y-axis did not move to row {}. Abort.".format(row)
             raise UnexpectedReplyError(msg)
 
-        # Send start data
-        _meta = {'timestamp': time.time(), 'name': scan_params['server'], 'type': 'stage'}
-        _data = {'status': 'start', 'scan': scan, 'row': row,
-                 'speed': self.get_speed(self.x_axis, unit='mm/s'),
-                 'x_start': self.steps_to_distance(self.position[0], unit='mm'),
-                 'y_start': self.steps_to_distance(self.position[1], unit='mm')}
-
         # Publish data
-        stage_pub.send_json({'meta': _meta, 'data': _data})
+        if data_out is not None:
+
+            _meta = {'timestamp': time(), 'name': scan_params['server'], 'type': 'stage'}
+            _data = {'status': 'start', 'scan': scan, 'row': row,
+                     'speed': self.get_speed(self.x_axis, unit='mm/s'),
+                     'x_start': self.steps_to_distance(self.position[0], unit='mm'),
+                     'y_start': self.steps_to_distance(self.position[1], unit='mm')}
+            # Put
+            data_out.send_json({'meta': _meta, 'data': _data})
 
         # Scan the current row
         x_reply = self.move_absolute(x_end if self.x_axis.get_position() == x_start else x_start, self.x_axis)
@@ -715,17 +707,15 @@ class ZaberXYStage:
             msg = "X-axis did not scan row {}. Abort.".format(row)
             raise UnexpectedReplyError(msg)
 
-        # Send stop data
-        _meta = {'timestamp': time.time(), 'name': scan_params['server'], 'type': 'stage'}
-        _data = {'status': 'stop',
-                 'x_stop': self.steps_to_distance(self.position[0], unit='mm'),
-                 'y_stop': self.steps_to_distance(self.position[1], unit='mm')}
+        # Publish stop data
+        if data_out is not None:
 
-        # Publish data
-        stage_pub.send_json({'meta': _meta, 'data': _data})
-
-        if socket_close:
-            stage_pub.close()
+            _meta = {'timestamp': time(), 'name': scan_params['server'], 'type': 'stage'}
+            _data = {'status': 'stop',
+                     'x_stop': self.steps_to_distance(self.position[0], unit='mm'),
+                     'y_stop': self.steps_to_distance(self.position[1], unit='mm')}
+            # Put
+            data_out.send_json({'meta': _meta, 'data': _data})
 
         if from_origin:
             # Move back to origin; move y first in order to not scan over device
@@ -742,11 +732,6 @@ class ZaberXYStage:
             dict containing all the info for doing a scan of a rectangular area.
         """
 
-        # initialize zmq data publisher
-        stage_pub = self.context.socket(zmq.PUB)
-        stage_pub.set_hwm(10)
-        stage_pub.bind(scan_params['tcp_address'])
-
         # Move to start point
         self.move_absolute(scan_params['start_pos'][0], self.x_axis)
         self.move_absolute(scan_params['start_pos'][1], self.y_axis)
@@ -755,11 +740,11 @@ class ZaberXYStage:
         self.set_speed(scan_params['speed'], self.x_axis, unit='mm/s')
 
         # Initialize scan
-        _meta = {'timestamp': time.time(), 'name': scan_params['server'], 'type': 'stage'}
+        _meta = {'timestamp': time(), 'name': scan_params['server'], 'type': 'stage'}
         _data = {'status': 'init', 'y_step': scan_params['step_size'], 'n_rows': scan_params['n_rows']}
 
-        # Send init data
-        stage_pub.send_json({'meta': _meta, 'data': _data})
+        # Put init data
+        scan_params['data_out'].send_json({'meta': _meta, 'data': _data})
 
         try:
 
@@ -784,7 +769,7 @@ class ZaberXYStage:
                         msg = "Low beam current or no beam in row {} of scan {}. " \
                               "Waiting for beam current to rise.".format(row, scan)
                         logging.warning(msg)
-                        time.sleep(1)
+                        sleep(1)
 
                         # If beam does not recover and we need to stop manually
                         if self.stop_scan.wait(1e-1):
@@ -792,7 +777,7 @@ class ZaberXYStage:
                             raise UnexpectedReplyError(msg)
 
                     # Scan row
-                    self._scan_row(row=row, scan_params=scan_params, scan=scan, stage_pub=stage_pub)
+                    self._scan_row(row=row, scan_params=scan_params, scan=scan, data_out=scan_params['data_out'])
 
                 # Increment
                 scan += 1
@@ -804,12 +789,12 @@ class ZaberXYStage:
 
         finally:
 
-            # Send finished data
-            _meta = {'timestamp': time.time(), 'name': scan_params['server'], 'type': 'stage'}
+            # Put finished data
+            _meta = {'timestamp': time(), 'name': scan_params['server'], 'type': 'stage'}
             _data = {'status': 'finished'}
 
             # Publish data
-            stage_pub.send_json({'meta': _meta, 'data': _data})
+            scan_params['data_out'].send_json({'meta': _meta, 'data': _data})
 
             # Reset speeds
             self.set_speed(10, self.x_axis, unit='mm/s')
@@ -828,6 +813,3 @@ class ZaberXYStage:
 
             if self.no_beam.is_set():
                 self.no_beam.clear()
-
-            # Close publish socket
-            stage_pub.close()

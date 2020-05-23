@@ -1,12 +1,13 @@
 import logging
 import pyqtgraph as pg
 import numpy as np
+from matplotlib import cm as mcmaps, colors as mcolors
 from PyQt5 import QtWidgets, QtCore, QtGui
 from collections import OrderedDict
+from irrad_control.gui.widgets.util_widgets import GridContainer
 
-# Matplotlib first 8 default colors
-_MPL_COLORS = [(31, 119, 180), (255, 127, 14), (44, 160, 44), (214, 39, 40),
-               (148, 103, 189), (140, 86, 75), (227, 119, 194), (127, 127, 127)]
+# Matplotlib default colors
+_MPL_COLORS = [tuple(round(255 * v) for v in rgb) for rgb in [mcolors.to_rgb(def_col) for def_col in mcolors.TABLEAU_COLORS]]
 
 _BOLD_FONT = QtGui.QFont()
 _BOLD_FONT.setBold(True)
@@ -45,6 +46,9 @@ class PlotWrapperWidget(QtWidgets.QWidget):
     def __init__(self, plot=None, parent=None):
         super(PlotWrapperWidget, self).__init__(parent=parent)
 
+        # Set a reasonable minimum size
+        self.setMinimumSize(300, 300)
+
         # PlotWidget to display; set size policy 
         self.pw = plot
         self.pw.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
@@ -52,7 +56,7 @@ class PlotWrapperWidget(QtWidgets.QWidget):
 
         # Main layout and sub layout for e.g. checkboxes which allow to show/hide curves in PlotWidget etc.
         self.setLayout(QtWidgets.QVBoxLayout())
-        self.sub_layout = QtWidgets.QVBoxLayout()
+        self.plot_options = GridContainer(name='Plot options' if not hasattr(self.pw, 'name') else '{} options'.format(self.pw.name))
         
         # Setup widget if class instance was initialized with plot
         if self.pw is not None:
@@ -62,11 +66,13 @@ class PlotWrapperWidget(QtWidgets.QWidget):
         """Setup of the additional widgets to control the appearance and content of the PlotWidget"""
 
         _sub_layout_1 = QtWidgets.QHBoxLayout()
+        _sub_layout_1.setSpacing(self.plot_options.grid.verticalSpacing())
         _sub_layout_2 = QtWidgets.QHBoxLayout()
+        _sub_layout_2.setSpacing(self.plot_options.grid.verticalSpacing())
 
         # Create checkboxes in order to show/hide curves in plots
         if hasattr(self.pw, 'show_data') and hasattr(self.pw, 'curves'):
-            _sub_layout_1.addWidget(QtWidgets.QLabel('Show curve(s):'))
+            _sub_layout_2.addWidget(QtWidgets.QLabel('Toggle curve{}:'.format('s' if len(self.pw.curves) > 1 else '')))
             all_checkbox = QtWidgets.QCheckBox('All')
             all_checkbox.setFont(_BOLD_FONT)
             all_checkbox.setChecked(True)
@@ -78,10 +84,16 @@ class PlotWrapperWidget(QtWidgets.QWidget):
                 checkbox.stateChanged.connect(lambda v, n=checkbox.text(): self.pw.show_data(n, bool(v)))
                 _sub_layout_2.addWidget(checkbox)
 
-        else:
-            logging.warning("{} has no 'show_data' method. Please implement it!".format(type(self.pw).__name__))
-
+        _sub_layout_1.addWidget(QtWidgets.QLabel('Features:'))
         _sub_layout_1.addStretch()
+
+        # Add possibility to en/disable showing curve statistics
+        if hasattr(self.pw, 'enable_stats'):
+            stats_checkbox = QtWidgets.QCheckBox('Enable statistics')
+            stats_checkbox.setChecked(self.pw._show_stats)
+            stats_checkbox.stateChanged.connect(lambda state: self.pw.enable_stats(bool(state)))
+            stats_checkbox.setToolTip("Show curve statistics while hovering / clicking curve(s)")
+            _sub_layout_1.addWidget(stats_checkbox)
 
         # Whenever x axis is time add spinbox to change time period for which data is shown
         if hasattr(self.pw, 'update_period'):
@@ -142,11 +154,11 @@ class PlotWrapperWidget(QtWidgets.QWidget):
         _sub_layout_1.addWidget(self.btn_open)
         _sub_layout_1.addWidget(self.btn_close)
 
-        self.sub_layout.addLayout(_sub_layout_1)
-        self.sub_layout.addLayout(_sub_layout_2)
+        self.plot_options.add_layout(_sub_layout_1)
+        self.plot_options.add_layout(_sub_layout_2)
         
         # Insert everything into main layout
-        self.layout().insertLayout(0, self.sub_layout)
+        self.layout().insertWidget(0, self.plot_options)
         self.layout().insertWidget(1, self.pw)
 
     def set_plot(self, plot):
@@ -163,14 +175,88 @@ class PlotWrapperWidget(QtWidgets.QWidget):
         self.external_win.show()
 
 
+class MultiPlotWidget(QtWidgets.QScrollArea):
+    """Widget to display multiple plot in a matrix"""
+
+    def __init__(self, plots=None, parent=None):
+        super(MultiPlotWidget, self).__init__(parent)
+
+        # Some basic settings
+        self.setFrameShape(QtWidgets.QFrame.NoFrame)
+        self.setWidgetResizable(True)
+        self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+
+        # Main widget is a vertical splitter
+        self.main_splitter = QtWidgets.QSplitter()
+        self.main_splitter.setOrientation(QtCore.Qt.Vertical)
+        self.main_splitter.setChildrenCollapsible(False)
+
+        # Colors
+        p, r = self.palette(), self.backgroundRole()
+        p.setColor(r, self.main_splitter.palette().color(QtGui.QPalette.AlternateBase))
+        self.setPalette(p)
+        self.setAutoFillBackground(True)
+
+        # Set main widget
+        self.setWidget(self.main_splitter)
+
+        # Add initial plots
+        if plots is not None:
+            if any(isinstance(x, (list, tuple)) for x in plots):
+                self.add_plot_matrix(plots)
+            else:
+                self.add_plots(plots)
+
+    def add_plots(self, plots):
+
+        # If we only add one plot; just add to layout
+        if isinstance(plots, QtWidgets.QWidget):
+            self.main_splitter.addWidget(plots)
+        # *plots* is an iterable of plots
+        elif isinstance(plots, (list, tuple)):
+            # Create a horizontal splitter
+            splitter = QtWidgets.QSplitter()
+            splitter.setOrientation(QtCore.Qt.Horizontal)
+            splitter.setChildrenCollapsible(False)
+            # Loop over individual plots and add them
+            for sub_plot in plots:
+                splitter.addWidget(sub_plot)
+            self.main_splitter.addWidget(splitter)  # Add to main layout
+            splitter.setSizes([self.width() / len(plots)] * len(plots))  # Same width
+        else:
+            raise TypeError("*plot* must be individual or iterable of plot widgets")
+
+    def add_plot_matrix(self, plot_matrix):
+
+        if not isinstance(plot_matrix, (list, tuple)):
+            raise ValueError("*plot* needs to be 2-dimensional iterable containing plots / QWidgets")
+
+        for sub_plots in plot_matrix:
+            self.add_plots(sub_plots)
+
+    def wheelEvent(self, ev):
+        """Override mousewheel; plots use mouse wheel event for zoom"""
+        if ev.type() == QtCore.QEvent.Wheel:
+            ev.ignore()
+
+
 class IrradPlotWidget(pg.PlotWidget):
     """Base class for plot widgets"""
 
     def __init__(self, refresh_rate=20, parent=None):
         super(IrradPlotWidget, self).__init__(parent)
 
-        # Store curves to be displayed
-        self.curves = None
+        # Actual plotitem
+        self.plt = self.getPlotItem()
+
+        # Store curves to be displayed and active curves under cursor
+        self.curves = OrderedDict()
+        self.active_curves = OrderedDict()  # Store channel which is currently active (e.g. statistics are shown)
+
+        # Hold data
+        self._data = OrderedDict()
+        self._data_is_set = False
 
         # Timer for refreshing plots with a given time interval to avoid unnecessary updating / high load
         self.refresh_timer = QtCore.QTimer()
@@ -180,6 +266,74 @@ class IrradPlotWidget(pg.PlotWidget):
 
         # Start timer
         self.refresh_timer.start(int(1000 / refresh_rate))
+
+        # Hold buttons which are inside the plot
+        self._in_plot_btns = []
+
+        # TextItem for showing statistic of curves; set invisible first, only show on user request
+        self.stats_text = pg.TextItem(text='No statistics to show', border=pg.mkPen(color='w', style=pg.QtCore.Qt.SolidLine))
+        self._static_stats_text = False
+        self._show_stats = False  # Show statistics of curves
+        self.stats_text.setVisible(False)
+
+    def enable_stats(self, enable=True):
+
+        def _manage_signals(sig, slot, connect):
+
+            try:
+                sig.connect(slot) if connect else sig.disconnect(slot)
+            except Exception:
+                logging.error('Signal {} not {} slot {}'.format(repr(sig), '{}connected {}'.format(*('', 'to') if connect else ('dis', 'from')), repr(slot)))
+
+        # Set flag
+        self._show_stats = enable
+
+        # Signals
+        _manage_signals(sig=self.plt.scene().sigMouseMoved, slot=self._set_active_curves, connect=enable)
+        _manage_signals(sig=self.plt.scene().sigMouseClicked, slot=self._set_active_curves, connect=enable)
+        _manage_signals(sig=self.plt.scene().sigMouseClicked, slot=self._toggle_static_stat_text, connect=enable)
+
+        # Add/remove stats text from plt
+        self.stats_text.setParentItem(self.plt if enable else None)
+
+        if not enable:
+            self.stats_text.setVisible(enable)
+
+    def _toggle_static_stat_text(self, click):
+        self._static_stats_text = not self._static_stats_text if any(self.active_curves.values()) else False
+        self._set_active_curves(click)
+
+    def _set_active_curves(self, event):
+        """Method updating which curves are active; active curves statistics are shown on plot"""
+
+        if self._static_stats_text:
+            return
+
+        # Check whether it was a click or move
+        click = hasattr(event, 'button')
+
+        event_pos = event if not click else event.scenePos()
+
+        # Get mouse coordinates in the coordinate system of the plot
+        pos = self.plt.vb.mapSceneToView(event_pos)
+
+        # Update current active curves
+        for curve in self.curves:
+            if isinstance(self.curves[curve], pg.PlotCurveItem):
+                self.active_curves[curve] = self.curves[curve].mouseShape().contains(pos) or self.curves[curve].getPath().contains(pos)
+            elif isinstance(self.curves[curve], CrosshairItem):
+                self.active_curves[curve] = True if self.curves[curve].intersect.pointsAt(pos) else False
+            elif isinstance(self.curves[curve], pg.ImageItem):
+                self.active_curves[curve] = self.plt.scene().sceneRect().contains(pos) and self.curves[curve] in self.plt.items
+            else:
+                self.active_curves[curve] = False
+
+        # We have active curves
+        if any(self.active_curves.values()):
+            self.stats_text.setPos(event_pos)
+            self.stats_text.setVisible(True)
+        else:
+            self.stats_text.setVisible(False)
 
     def _setup_plot(self):
         raise NotImplementedError('Please implement a _setup_plot method')
@@ -193,15 +347,38 @@ class IrradPlotWidget(pg.PlotWidget):
     def update_refresh_rate(self, refresh_rate):
         """Update rate with which the plot is drawn"""
         if refresh_rate == 0:
+            logging.warning("{} display stopped. Data is not being buffered while not being displayed.".format(type(self).__name__))
             self.refresh_timer.stop()  # Stops QTimer
         else:
             self.refresh_timer.start(int(1000 / refresh_rate))  # Restarts QTimer with new updated interval
 
+    def add_plot_button(self, btn):
+        """Adds an in-plot button to the plotitem"""
+
+        if btn not in self._in_plot_btns:
+            self._in_plot_btns.append(btn)
+
+        self._update_button_pos()
+
+    def _update_button_pos(self, btn_spacing=20, x_offset=70, y_offset=5):
+
+        btn_pos_x = x_offset
+        btn_pos_y = y_offset
+
+        is_visible = [b.isVisible() for b in self._in_plot_btns]
+
+        for i, _btn in enumerate(self._in_plot_btns):
+
+            # The first button will always be set to upper left corner
+            # Check if the previous button was visible; if not, place at current position
+            if i != 0 and is_visible[i - 1]:
+                btn_pos_x += self._in_plot_btns[i - 1].boundingRect().width() + btn_spacing
+
+            # Place button
+            _btn.setPos(btn_pos_x, btn_pos_y)
+
     def show_data(self, curve=None, show=True):
         """Show/hide the data of curve in PlotItem. If *curve* is None, all curves are shown/hidden."""
-
-        if not self.curves:
-            raise NotImplementedError("Please define the attribute dict 'curves' and fill it with curves")
 
         if curve is not None and curve not in self.curves:
             logging.error('{} data not in graph. Current graphs: {}'.format(curve, ','.join(self.curves.keys())))
@@ -210,32 +387,29 @@ class IrradPlotWidget(pg.PlotWidget):
         _curves = [curve] if curve is not None else self.curves.keys()
 
         for _cu in _curves:
-            if show:
-                if not isinstance(self.curves[_cu], pg.InfiniteLine):
-                    self.legend.addItem(self.curves[_cu], _cu)
-                self.plt.addItem(self.curves[_cu])
+            if isinstance(self.curves[_cu], CrosshairItem):
+                self.curves[_cu].add_to_plot() if show else self.curves[_cu].remove_from_plot()
+                self.curves[_cu].add_to_legend() if show else self.curves[_cu].remove_from_legend()
             else:
-                if not isinstance(self.curves[_cu], pg.InfiniteLine):
-                    self.legend.removeItem(_cu)
-                self.plt.removeItem(self.curves[_cu])
+
+                if not any(isinstance(self.curves[_cu], x) for x in (pg.InfiniteLine, pg.ImageItem)):
+                    self.legend.addItem(self.curves[_cu], _cu) if show else self.legend.removeItem(_cu)
+
+                self.plt.addItem(self.curves[_cu]) if show else self.plt.removeItem(self.curves[_cu])
 
 
 class ScrollingIrradDataPlot(IrradPlotWidget):
     """PlotWidget which displays a set of irradiation data curves over time"""
 
-    def __init__(self, channels, units=None, period=60, refresh_rate=20, name=None, parent=None):
+    def __init__(self, channels, units=None, period=60, refresh_rate=20, colors=_MPL_COLORS, name=None, parent=None):
         super(ScrollingIrradDataPlot, self).__init__(refresh_rate=refresh_rate, parent=parent)
 
         self.channels = channels
         self.units = units
         self.name = name
 
-        # Setup the main plot
-        self._setup_plot()
-
         # Attributes for data visualization
         self._time = None  # array for timestamps
-        self._data = None
         self._start = 0  # starting timestamp of each cycle
         self._timestamp = 0  # timestamp of each incoming data
         self._offset = 0  # offset for increasing cycle time
@@ -243,12 +417,15 @@ class ScrollingIrradDataPlot(IrradPlotWidget):
         self._period = period  # amount of time for which to display data; default, displaying last 60 seconds of data
         self._filled = False  # bool to see whether the array has been filled
         self._drate = None  # data rate
+        self._colors = colors  # Colors to plot curves in
+
+        # Setup the main plot
+        self._setup_plot()
 
     def _setup_plot(self):
         """Setting up the plot. The Actual plot (self.plt) is the underlying PlotItem of the respective PlotWidget"""
 
         # Get plot item and setup
-        self.plt = self.getPlotItem()
         self.plt.setDownsampling(auto=True)
         self.plt.setLabel('left', text='Signal', units='V' if self.units is None else self.units['left'])
 
@@ -264,77 +441,51 @@ class ScrollingIrradDataPlot(IrradPlotWidget):
         self.plt.showGrid(x=True, y=True, alpha=0.66)
         self.plt.setLimits(xMax=0)
 
-        # Make OrderedDict of curves and dict to hold active value indicating whether the user interacts with the curve
-        self.curves = OrderedDict([(ch, pg.PlotCurveItem(pen=_MPL_COLORS[i % len(_MPL_COLORS)])) for i, ch in enumerate(self.channels)])
-        self.active_curves = dict([(ch, False) for ch in self.channels])  # Store channel which is currently active (e.g. statistics are shown)
-
-        # TextItem for showing statistic of curves; set invisible first, only show on user request
-        self.stat_text = pg.TextItem(text='', border=pg.mkPen(color='w', style=pg.QtCore.Qt.SolidLine))
-        self.stat_text.setParentItem(self.plt)
-        self.stat_text.setVisible(False)
+        self.enable_stats()
 
         # Make legend entries for curves
         self.legend = pg.LegendItem(offset=(80, -50))
         self.legend.setParentItem(self.plt)
 
-        # Show data and legend
-        for ch in self.channels:
-            self.show_data(ch)
-            self.curves[ch].setOpacity(0.7)  # Needed for indication of active curves
+        # Make OrderedDict of curves and dict to hold active value indicating whether the user interacts with the curve
+        for i, ch in enumerate(self.channels):
+            self.curves[ch] = pg.PlotCurveItem(pen=self._colors[i % len(self._colors)])
             self.curves[ch].opts['mouseWidth'] = 20  # Needed for indication of active curves
+            self.show_data(ch)  # Show data and legend
 
-        # Connect to relevant signals
-        self.plt.scene().sigMouseMoved.connect(self._indicate_active_curves)
-        self.plt.scene().sigMouseClicked.connect(self._set_active_curves)
+    def _set_stats(self):
+        """Show curve statistics for active_curves which have been clicked or are hovered over"""
 
-        # TODO: Maybe use proxies to limit load
-        #self._proxy_move = pg.SignalProxy(self.plt.scene().sigMouseMoved, rateLimit=20, slot=self._indicate_active_curves)
-        #self._proxy_click = pg.SignalProxy(self.plt.scene().sigMouseClicked, rateLimit=20, slot=self._set_active_curves)
+        current_actives = [curve for curve in self.active_curves if self.active_curves[curve]]
 
-    def _indicate_active_curves(self, evt):
-        """Indicate if we are hovering over a curve"""
+        if not current_actives:
+            return
 
-        # Get mouse coordinates in the coordinate system of the plot
-        mouse_coordinates = self.plt.vb.mapSceneToView(evt)
+        n_actives = len(current_actives)
 
-        # Set opacity of all the curves which are under the cursor to 1
-        for ch in self.channels:
-            if not self.active_curves[ch]:
-                self._draw_active_curve(curve=ch, active=self.curves[ch].mouseShape().contains(mouse_coordinates))
+        # Update text for statistics widget
+        current_stat_text = 'Curve stats of {} curve{}:\n'.format(n_actives, '' if n_actives == 1 else 's')
 
-    def _draw_active_curve(self, curve, active=True):
-        """Helper function which changes appearance of curves under the cursor"""
+        # Loop over active curves and create current stats
+        for curve in current_actives:
 
-        # Indicate activity status by changing pen and opacity
-        # FIXME: heavy load when pen width > 1 due to https://github.com/pyqtgraph/pyqtgraph/issues/533
-        if active:  # Curve is active
-            if self.curves[curve].opts['pen'].width() == 0.7:  # Only update if needed
-                self.curves[curve].opts['pen'].setWidthF(1.0)
-            if self.curves[curve].opacity() == 0.7:
-                self.curves[curve].setOpacity(1.0)
-        else:
-            if self.curves[curve].opts['pen'].width() == 1.0:  # Only update if needed
-                self.curves[curve].opts['pen'].setWidthF(0.7)
-            if self.curves[curve].opacity() == 1.0:
-                self.curves[curve].setOpacity(0.7)
+            # If data is not yet filled; mask all NaN values and invert bool mask
+            mask = None if self._filled else ~np.isnan(self._data[curve])
 
-    def _set_active_curves(self, click):
-        """Method updating which curves are active; active curves statistics are shown on plot"""
+            # Get stats
+            if mask is None:
+                mean, std, entries = self._data[curve].mean(), self._data[curve].std(), self._data[curve].shape[0]
+            else:
+                mean, std, entries = self._data[curve][mask].mean(), self._data[curve][mask].std(), self._data[curve][mask].shape[0]
 
-        # Get mouse coordinates in the coordinate system of the plot
-        mouse_coordinates = self.plt.vb.mapSceneToView(click.scenePos())
+            current_stat_text += '  '
+            current_stat_text += curve + u': ({:.2E} \u00B1 {:.2E}) {} (#{})'.format(mean, std, self.plt.getAxis('left').labelUnits, entries)
+            current_stat_text += '\n' if curve != current_actives[-1] else ''
 
-        # Get curves which are under the mouse position
-        self.active_curves = dict([(ch, self.curves[ch].mouseShape().contains(mouse_coordinates)) for ch in self.channels])
-
-        if any(self.active_curves.values()):
-            self.stat_text.setPos(click.scenePos())
-            self.stat_text.setVisible(True)
-        else:
-            self.stat_text.setVisible(False)
-
-        for ch in self.channels:
-            self._draw_active_curve(curve=ch, active=self.active_curves[ch])
+        # Set color and text
+        current_stat_color = (100, 100, 100) if n_actives != 1 else self.curves[current_actives[0]].opts['pen'].color()
+        self.stats_text.fill = pg.mkBrush(color=current_stat_color, style=pg.QtCore.Qt.SolidPattern)
+        self.stats_text.setText(current_stat_text)
 
     def set_data(self, data):
         """Set the data of the plot. Input data is data plus meta data"""
@@ -354,8 +505,10 @@ class ScrollingIrradDataPlot(IrradPlotWidget):
             if 'data_rate' in _meta:
                 self._drate = _meta['data_rate']
                 shape = int(round(self._drate) * self._period + 1)
-                self._time = np.full(shape=shape, fill_value=np.nan)  # np.zeros(shape=shape)
-                self._data = OrderedDict([(ch, np.full(shape=shape, fill_value=np.nan)) for i, ch in enumerate(self.channels)])
+                self._time = np.full(shape=shape, fill_value=np.nan)
+                for ch in self.channels:
+                    self._data[ch] = np.full(shape=shape, fill_value=np.nan)
+                self._data_is_set = True
 
         # Fill data
         else:
@@ -385,39 +538,19 @@ class ScrollingIrradDataPlot(IrradPlotWidget):
     def refresh_plot(self):
         """Refresh the plot. This method is supposed to be connected to the timeout-Signal of a QTimer"""
 
-        if self._data is None or self._time is None:
-            return
+        if self._data_is_set:
+            for curve in self.curves:
 
-        # Update text for statistics widget and check how many curves are active
-        current_stat_text = ''
-        current_actives = [ch for ch in self.active_curves if self.active_curves[ch]]
-
-        # Loop variables
-        mask, i = None, 0
-        for curve in self.curves:
-
-            # Update data of curves
-            if not self._filled:
-                mask = ~np.isnan(self._data[curve])  # Mask all NaN values and invert bool mask
-                self.curves[curve].setData(self._time[mask], self._data[curve][mask])
-            else:
-                self.curves[curve].setData(self._time, self._data[curve])
-
-            # Update statistics of active curves
-            if curve in current_actives:
-                if mask is not None:
-                    mean, std, entries = self._data[curve][mask].mean(), self._data[curve][mask].std(), self._data[curve][mask].shape[0]
+                # Update data of curves
+                if not self._filled:
+                    mask = ~np.isnan(self._data[curve])  # Mask all NaN values and invert bool mask
+                    self.curves[curve].setData(self._time[mask], self._data[curve][mask])
                 else:
-                    mean, std, entries = self._data[curve].mean(), self._data[curve].std(), self._data[curve].shape[0]
-                current_stat_text += curve + u': ({:.2E} \u00B1 {:.2E}) {} (#{})'.format(mean, std, self.plt.getAxis('left').labelUnits, entries)
-                current_stat_text += '' if i == len(current_actives) - 1 else '\n'
-                i += 1
+                    self.curves[curve].setData(self._time, self._data[curve])
 
-        # If curves are active, update text and color accordingly
-        if current_actives:
-            current_stat_color = (100, 100, 100) if len(current_actives) != 1 else self.curves[current_actives[0]].opts['pen'].color()
-            self.stat_text.fill = pg.mkBrush(color=current_stat_color, style=pg.QtCore.Qt.SolidPattern)
-            self.stat_text.setText(current_stat_text)
+            # Only calculate statistics if we look at them
+            if self._show_stats:
+                self._set_stats()
 
     def update_axis_scale(self, scale, axis='left'):
         """Update the scale of current axis"""
@@ -431,11 +564,11 @@ class ScrollingIrradDataPlot(IrradPlotWidget):
 
         # Create new data and time
         shape = int(round(self._drate) * self._period + 1)
-        new_data = OrderedDict([(ch, np.full(shape=shape, fill_value=np.nan)) for i, ch in enumerate(self.channels)])
+        new_data = OrderedDict([(ch, np.full(shape=shape, fill_value=np.nan)) for ch in self.channels])
         new_time = np.full(shape=shape, fill_value=np.nan)
 
         # Check whether new time and data hold more or less indices
-        decreased = True if self._time.shape[0] >= shape else False
+        decreased = self._time.shape[0] >= shape
 
         if decreased:
             # Cut time axis
@@ -493,15 +626,17 @@ class RawDataPlot(ScrollingIrradDataPlot):
                                           parent=parent)
 
         # Make in-plot button to switch between units
-        self.unit_btn = PlotPushButton(plotitem=self.plt, text='Switch unit ({})'.format('A'))
-        self.unit_btn.setPos(self.plt.width()*0.1, self.plt.height()*0.01)
-        self.unit_btn.clicked.connect(self.change_unit)
+        unit_btn = PlotPushButton(plotitem=self.plt, text='Switch unit ({})'.format('A'))
+        unit_btn.clicked.connect(self.change_unit)
 
         # Connect to signal
         for con in [lambda u: self.plt.getAxis('left').setLabel(text='Signal', units=u),
-                    lambda u: self.unit_btn.setText('Switch unit ({})'.format('A' if u == 'V' else 'V')),
+                    lambda u: unit_btn.setText('Switch unit ({})'.format('A' if u == 'V' else 'V')),
                     lambda u: setattr(self, '_data', self.convert_to_unit(self._data, u))]:  # convert between units
             self.unitChanged.connect(con)
+
+        # Add
+        self.add_plot_button(unit_btn)
 
     def change_unit(self):
         self.use_unit = 'V' if self.use_unit == 'A' else 'A'
@@ -509,6 +644,11 @@ class RawDataPlot(ScrollingIrradDataPlot):
 
     def convert_to_unit(self, data, unit):
         """Method to convert raw data between Volt and Ampere"""
+
+        # Check whether data is not None
+        if not data:
+            logging.info('No data to convert')
+            return
 
         res = OrderedDict()
 
@@ -558,6 +698,9 @@ class PlotPushButton(pg.TextItem):
         super(PlotPushButton, self).setPos(*args, **kwargs)
         self.btn_area = QtCore.QRectF(self.mapToParent(self.boundingRect().topLeft()), self.mapToParent(self.boundingRect().bottomRight()))
 
+    def setFill(self, *args, **kwargs):
+        self.fill = pg.mkBrush(*args, **kwargs)
+
     def _check_hover(self, evt):
         if self.btn_area.contains(evt):
             self.setOpacity(1.0)
@@ -604,7 +747,7 @@ class TemperatureDataPlot(ScrollingIrradDataPlot):
         self.plt.setLabel('right', text='Temperature', units='C')
 
 
-class BeamPositionItem:
+class CrosshairItem:
     """This class implements three pyqtgraph items in order to display a reticle with a circle in its intersection."""
 
     def __init__(self, color, name, intersect_symbol=None, horizontal=True, vertical=True):
@@ -722,35 +865,34 @@ class BeamPositionPlot(IrradPlotWidget):
     Plot for displaying the beam position. The position is displayed from analog and digital data if available.
     """
 
-    def __init__(self, daq_setup, daq_device=None, parent=None):
+    def __init__(self, daq_setup, position_range=None, daq_device=None, name=None, add_hist=True, parent=None):
         super(BeamPositionPlot, self).__init__(parent=parent)
 
         # Init class attributes
         self.daq_setup = daq_setup
         self.ro_types = daq_setup['devices']['adc']['types']
         self.daq_device = daq_device
+        self._plt_range = position_range if position_range else [-110, 110] * 2
+        self._add_hist = add_hist
+        self.name = name if name is not None else type(self).__name__ if self.daq_device is None else type(self).__name__ + ' ' + self.daq_device
 
         # Setup the main plot
         self._setup_plot()
 
-        # Store data
-        self._data = {}
-
     def _setup_plot(self):
 
         # Get plot item and setup
-        self.plt = self.getPlotItem()
         self.plt.setDownsampling(auto=True)
-        self.plt.setTitle(type(self).__name__ if self.daq_device is None else type(self).__name__ + ' ' + self.daq_device)
+        self.plt.setTitle(self.name)
         self.plt.setLabel('left', text='Vertical displacement', units='%')
         self.plt.setLabel('bottom', text='Horizontal displacement', units='%')
-        self.plt.showGrid(x=True, y=True, alpha=0.66)
-        self.plt.setRange(xRange=[-100, 100], yRange=[-100, 100])
-        self.plt.setLimits(xMax=110, xMin=-110, yMax=110, yMin=-110)
-        xyticks = dict([(v, str(abs(v))) for v in range(-120, 130, 20)])
-        self.plt.getAxis('bottom').setTicks([xyticks.items()])
-        self.plt.getAxis('left').setTicks([xyticks.items()])
+        self.plt.showGrid(x=True, y=True, alpha=0.99)
+        self.plt.setRange(xRange=self._plt_range[:2], yRange=self._plt_range[2:])
+        self.plt.setLimits(**dict([(k, self._plt_range[i]) for i, k in enumerate(('xMin', 'xMax', 'yMin', 'yMax'))]))
         self.plt.hideButtons()
+
+        self.enable_stats()
+
         v_line = self.plt.addLine(x=0, pen={'color': 'w', 'style': pg.QtCore.Qt.DashLine})
         h_line = self.plt.addLine(y=0., pen={'color': 'w', 'style': pg.QtCore.Qt.DashLine})
         _ = pg.InfLineLabel(line=h_line, text='Left', position=0.05, movable=False)
@@ -760,26 +902,69 @@ class BeamPositionPlot(IrradPlotWidget):
         self.legend = pg.LegendItem(offset=(80, -50))
         self.legend.setParentItem(self.plt)
 
-        self.curves = OrderedDict()
-
         if any(x in self.ro_types for x in ('sem_h_shift', 'sem_v_shift')):
             sig = 'analog'
-            self.curves[sig] = BeamPositionItem(color=_MPL_COLORS[0], name=sig,
-                                                horizontal='sem_h_shift' in self.ro_types,
-                                                vertical='sem_v_shift' in self.ro_types)
+            self.curves[sig] = CrosshairItem(color=_MPL_COLORS[0], name=sig,
+                                             horizontal='sem_h_shift' in self.ro_types,
+                                             vertical='sem_v_shift' in self.ro_types)
+
+            # Add 2D histogram
+            if self._add_hist and self.curves[sig].horizontal and self.curves[sig].vertical:
+                self.add_2d_hist(curve=sig, autoDownsample=True, opacity=0.66, cmap='hot')
 
         if any(all(x in self.ro_types for x in y) for y in [('sem_left', 'sem_right'), ('sem_up', 'sem_down')]):
             sig = 'digital'
-            self.curves[sig] = BeamPositionItem(color=_MPL_COLORS[1], name=sig,
-                                                horizontal='sem_left' in self.ro_types and 'sem_right' in self.ro_types,
-                                                vertical='sem_up' in self.ro_types and 'sem_down' in self.ro_types)
+            self.curves[sig] = CrosshairItem(color=_MPL_COLORS[1], name=sig,
+                                             horizontal='sem_left' in self.ro_types and 'sem_right' in self.ro_types,
+                                             vertical='sem_up' in self.ro_types and 'sem_down' in self.ro_types)
+            # Add 2D histogram
+            if self._add_hist and self.curves[sig].horizontal and self.curves[sig].vertical:
+                self.add_2d_hist(curve=sig, autoDownsample=True, opacity=0.66, cmap='hot')
 
         # Show data and legend
         if self.curves:
             for curve in self.curves:
-                self.curves[curve].set_legend(self.legend)
-                self.curves[curve].set_plotitem(self.plt)
+                if isinstance(self.curves[curve], CrosshairItem):
+                    self.curves[curve].set_legend(self.legend)
+                    self.curves[curve].set_plotitem(self.plt)
                 self.show_data(curve)
+
+    def add_2d_hist(self, curve, cmap='hot', bins=(50, 50), **kwargs):
+
+        if curve not in self.curves:
+            logging.error("Can only add histogram to existing curve")
+            return
+
+        if len(bins) != 2:
+            raise ValueError("Bins must be iterable of integers of len 2")
+
+        hist_name = curve + '_hist'
+
+        if 'lut' not in kwargs:
+            # Create colormap and init
+            colormap = mcmaps.get_cmap(cmap)
+            colormap._init()
+
+            # Convert matplotlib colormap from 0-1 to 0 -255 for Qt
+            lut = (colormap._lut * 255).view(np.ndarray)
+            # Update kw
+            kwargs['lut'] = lut
+
+        get_scale = lambda plt_range, n_bins: float(abs(plt_range[0] - plt_range[1])) / n_bins
+
+        # Add and manage position
+        self.curves[hist_name] = pg.ImageItem(**kwargs)
+        self.curves[hist_name].translate(self._plt_range[0], self._plt_range[2])
+        self.curves[hist_name].scale(get_scale(self._plt_range[:2], bins[0]), get_scale(self._plt_range[2:], bins[1]))
+        self.curves[hist_name].setZValue(-10)
+
+        # Add hist data
+        self._data[hist_name] = {}
+        self._data[hist_name]['hist'] = np.zeros(shape=bins)
+        self._data[hist_name]['edges'] = (np.linspace(self._plt_range[0], self._plt_range[1], bins[0] + 1),
+                                          np.linspace(self._plt_range[2], self._plt_range[3], bins[1] + 1))
+        self._data[hist_name]['centers'] = (0.5 * (self._data[hist_name]['edges'][0][1:] + self._data[hist_name]['edges'][0][:-1]),
+                                            0.5 * (self._data[hist_name]['edges'][1][1:] + self._data[hist_name]['edges'][1][:-1]))
 
     def set_data(self, data):
 
@@ -795,29 +980,75 @@ class BeamPositionPlot(IrradPlotWidget):
             # Update data
             self._data[sig] = (h_shift, v_shift)
 
-    def refresh_plot(self):
-        """Refresh the plot. This method is supposed to be connected to the timeout-Signal of a QTimer"""
-        if self._data:
-            for sig in self.curves:
-                self.curves[sig].set_position(*self._data[sig])
+            if sig + '_hist' in self.curves and all(x is not None for x in self._data[sig]):
+                # Get histogram indices and increment
+                idx_x, idx_y = (np.searchsorted(self._data[sig + '_hist']['edges'][i], self._data[sig][i]) for i in range(len(self._data[sig])))
+                try:
+                    self._data[sig + '_hist']['hist'][idx_x, idx_y] += 1
+                except IndexError:
+                    logging.debug("Histogram indices ({},{}) out of bounds for shape ({},{})".format(idx_x, idx_y, *self._data[sig + '_hist']['hist'].shape))
+        self._data_is_set = True
 
-    def show_data(self, curve=None, show=True):
-        """Show/hide the data of channel in PlotItem. If *channel* is None, all curves are shown/hidden."""
+    def _set_stats(self):
+        """Show curve statistics for active_curves which have been clicked or are hovered over"""
 
-        if curve is not None and curve not in self.curves:
-            logging.error('{} data not in graph. Current graphs: {}'.format(curve, ','.join(self.curves.keys())))
+        current_actives = [curve for curve in self.active_curves if self.active_curves[curve]]
+
+        if not current_actives:
             return
 
-        _curves = [curve] if curve is not None else self.curves.keys()
+        n_actives = len(current_actives)
 
-        for _cu in _curves:
+        # Update text for statistics widget
+        current_stat_text = 'Curve stats of {} curve{}:\n'.format(n_actives, '' if n_actives == 1 else 's')
 
-            if show:
-                self.curves[_cu].add_to_plot()
-                self.curves[_cu].add_to_legend()
+        # Loop over active curves and create current stats
+        for curve in current_actives:
+
+            current_stat_text += '  '
+
+            # Histogram stats
+            if 'hist' in curve:
+                v = np.sum(self._data[curve]['hist'], axis=0)
+                h = np.sum(self._data[curve]['hist'], axis=1)
+                try:  # Weights are fine
+                    mean_h = np.average(self._data[curve]['centers'][0], weights=h)
+                    std_h = np.sqrt(np.average((self._data[curve]['centers'][0] - mean_h)**2, weights=h))
+                    mean_v = np.average(self._data[curve]['centers'][0], weights=v)
+                    std_v = np.sqrt(np.average((self._data[curve]['centers'][1] - mean_v) ** 2, weights=v))
+                except ZeroDivisionError:  # Weights sum up to 0; no histogram entries
+                    mean_h = std_h = mean_v = std_v = np.nan
+
+                current_stat_text += curve + ':\n    '
+                current_stat_text += u'Horizontal: ({:.2f} \u00B1 {:.2f}) {}'.format(mean_h, std_h, self.plt.getAxis('bottom').labelUnits) + '\n    '
+                current_stat_text += u'Vertical: ({:.2f} \u00B1 {:.2f}) {}'.format(mean_v, std_v, self.plt.getAxis('left').labelUnits)
+
             else:
-                self.curves[_cu].remove_from_plot()
-                self.curves[_cu].remove_from_legend()
+                current_stat_text += curve + ':\n    ' + u'Position: ({:.2f}, {:.2f}) {}'.format(self._data[curve][0],
+                                                                                                 self._data[curve][1],
+                                                                                                 self.plt.getAxis('bottom').labelUnits)
+
+            current_stat_text += '\n' if curve != current_actives[-1] else ''
+
+        # Set color and text
+        current_stat_color = (100, 100, 100)
+        self.stats_text.fill = pg.mkBrush(color=current_stat_color, style=pg.QtCore.Qt.SolidPattern)
+        self.stats_text.setText(current_stat_text)
+
+    def refresh_plot(self):
+        """Refresh the plot. This method is supposed to be connected to the timeout-Signal of a QTimer"""
+
+        if self._data_is_set:
+            for sig in self.curves:
+                if sig not in self._data:
+                    continue
+                if isinstance(self.curves[sig], CrosshairItem):
+                    self.curves[sig].set_position(*self._data[sig])
+                else:
+                    self.curves[sig].setImage(self._data[sig]['hist'])
+
+            if self._show_stats:
+                self._set_stats()
 
 
 class FluenceHist(IrradPlotWidget):
@@ -832,15 +1063,14 @@ class FluenceHist(IrradPlotWidget):
         self.irrad_setup = irrad_setup
         self.daq_device = daq_device
 
+        self._data['hist_rows'] = np.arange(self.irrad_setup['n_rows'] + 1)
+
         # Setup the main plot
         self._setup_plot()
-
-        self._data = {}
 
     def _setup_plot(self):
 
         # Get plot item and setup
-        self.plt = self.getPlotItem()
         self.plt.setDownsampling(auto=True)
         self.plt.setTitle(type(self).__name__ if self.daq_device is None else type(self).__name__ + ' ' + self.daq_device)
         self.plt.setLabel('left', text='Proton fluence', units='cm^-2')
@@ -854,28 +1084,25 @@ class FluenceHist(IrradPlotWidget):
         self.legend.setParentItem(self.plt)
 
         # Histogram of fluence per row
-        hist_curve = pg.PlotCurveItem()
-        hist_curve.setFillLevel(0.33)
-        hist_curve.setBrush(pg.mkBrush(color=_MPL_COLORS[0]))
+        self.curves['hist'] = pg.PlotCurveItem()
+        self.curves['hist'].setFillLevel(0.33)
+        self.curves['hist'].setBrush(pg.mkBrush(color=_MPL_COLORS[0]))
 
         # Points at respective row positions
-        hist_points = pg.ScatterPlotItem()
-        hist_points.setPen(color=_MPL_COLORS[2], style=pg.QtCore.Qt.SolidLine)
-        hist_points.setBrush(color=_MPL_COLORS[2])
-        hist_points.setSymbol('o')
-        hist_points.setSize(10)
+        self.curves['points'] = pg.ScatterPlotItem()
+        self.curves['points'].setPen(color=_MPL_COLORS[2], style=pg.QtCore.Qt.SolidLine)
+        self.curves['points'].setBrush(color=_MPL_COLORS[2])
+        self.curves['points'].setSymbol('o')
+        self.curves['points'].setSize(10)
 
         # Errorbars for points; needs to initialized with x, y args, otherwise cnnot be added to PlotItem
-        hist_errors = pg.ErrorBarItem(x=np.arange(1), y=np.arange(1), beam=0.25)
+        self.curves['errors'] = pg.ErrorBarItem(x=np.arange(1), y=np.arange(1), beam=0.25)
 
         # Horizontal line indication the mean fluence over all rows
-        mean_curve = pg.InfiniteLine(angle=0)
-        mean_curve.setPen(color=_MPL_COLORS[1], width=2)
-        self.p_label = pg.InfLineLabel(mean_curve, position=0.2)
-        self.n_label = pg.InfLineLabel(mean_curve, position=0.8)
-
-        self.curves = OrderedDict([('hist', hist_curve), ('hist_points', hist_points),
-                                   ('hist_errors', hist_errors), ('mean', mean_curve)])
+        self.curves['mean'] = pg.InfiniteLine(angle=0)
+        self.curves['mean'].setPen(color=_MPL_COLORS[1], width=2)
+        self.p_label = pg.InfLineLabel(self.curves['mean'], position=0.2)
+        self.n_label = pg.InfLineLabel(self.curves['mean'], position=0.8)
 
         # Show data and legend
         for curve in self.curves:
@@ -886,21 +1113,147 @@ class FluenceHist(IrradPlotWidget):
         # Meta data and data
         _meta, _data = data['meta'], data['data']
 
+        # Set data
         self._data['hist'] = data['data']['hist']
         self._data['hist_err'] = data['data']['hist_err']
 
+        # Get stats
+        self._data['hist_mean'], self._data['hist_std'] = (f(self._data['hist']) for f in (np.mean, np.std))
+
+        self._data_is_set = True
+
     def refresh_plot(self):
         """Refresh the plot. This method is supposed to be connected to the timeout-Signal of a QTimer"""
-        if self._data:
-            x = np.arange(len(self._data['hist']) + 1)
+        if self._data_is_set:
             for curve in self.curves:
                 if curve == 'hist':
-                    self.curves[curve].setData(x=x, y=self._data['hist'], stepMode=True)
-                    mean, std = (f(self._data['hist']) for f in (np.mean, np.std))
-                    self.curves['mean'].setValue(mean)
-                    self.p_label.setFormat('Mean: ({:.2E} +- {:.2E}) protons / cm^2'.format(mean, std))
-                    self.n_label.setFormat('Mean: ({:.2E} +- {:.2E}) neq / cm^2'.format(*[x * self.irrad_setup['kappa'] for x in (mean, std)]))
-                elif curve == 'hist_points':
-                    self.curves[curve].setData(x=x[:-1] + 0.5, y=self._data['hist'])
-                elif curve == 'hist_errors':
-                    self.curves[curve].setData(x=x[:-1] + 0.5, y=self._data['hist'], height=np.array(self._data['hist_err']), pen=_MPL_COLORS[2])
+                    self.curves[curve].setData(x=self._data['hist_rows'], y=self._data['hist'], stepMode=True)
+                    self.curves['mean'].setValue(self._data['hist_mean'])
+                    self.p_label.setFormat('Mean: ({:.2E} +- {:.2E}) protons / cm^2'.format(self._data['hist_mean'], self._data['hist_std']))
+                    self.n_label.setFormat('Mean: ({:.2E} +- {:.2E}) neq / cm^2'.format(*[x * self.irrad_setup['kappa'] for x in (self._data['hist_mean'],
+                                                                                                                                  self._data['hist_std'])]))
+
+                elif curve == 'points':
+                    self.curves[curve].setData(x=self._data['hist_rows'][:-1] + 0.5, y=self._data['hist'])
+                elif curve == 'errors':
+                    self.curves[curve].setData(x=self._data['hist_rows'][:-1] + 0.5, y=self._data['hist'], height=np.array(self._data['hist_err']), pen=_MPL_COLORS[2])
+
+
+class FractionHist(IrradPlotWidget):
+    """This implements a histogram of the fraction of one signal to another"""
+
+    def __init__(self, rel_sig, norm_sig, bins=100, colors=_MPL_COLORS, refresh_rate=10, parent=None):
+        super(FractionHist, self).__init__(refresh_rate=refresh_rate, parent=parent)
+
+        # Signal names; relative signal versus the signal it's normalized to
+        self.rel_sig = rel_sig
+        self.norm_sig = norm_sig
+
+        # Get colors
+        self.colors = colors
+
+        # Hold data
+        self._data['hist'], self._data['edges'] = np.zeros(shape=bins), np.linspace(0, 100, bins + 1)
+        self._data['centers'] = 0.5 * (self._data['edges'][1:] + self._data['edges'][:-1])
+
+        self._setup_plot()
+
+    def _setup_plot(self):
+
+        # Get plot item and setup
+        self.plt.setDownsampling(auto=True)
+        self.plt.setTitle(type(self).__name__ + ' ' + self.rel_sig)
+        self.plt.setLabel('left', text='#')
+        self.plt.setLabel('bottom', text='Fraction {} / {}'.format(self.rel_sig, self.norm_sig), units='%')
+        self.plt.getAxis('left').enableAutoSIPrefix(False)
+        self.plt.showGrid(x=True, y=True)
+        self.plt.setLimits(xMin=0, xMax=self._data['edges'].shape[0], yMin=0)
+        self.legend = pg.LegendItem(offset=(80, 80))
+        self.legend.setParentItem(self.plt)
+
+        self.enable_stats()
+
+        # Histogram of fraction
+        self.curves['hist'] = pg.PlotCurveItem(name='{} / {} histogram'.format(self.rel_sig, self.norm_sig))
+        self.curves['hist'].setFillLevel(0.33)
+        self.curves['hist'].setBrush(pg.mkBrush(color=self.colors[0]))
+
+        # Init items needed
+        self.curves['current_frac'] = CrosshairItem(color=self.colors[1], name='Current bin')
+        self.curves['current_frac'].v_shift_line.setValue(5)  # Make crosshair point visible above 0
+        self.curves['current_frac'].v_shift_line.setVisible(False)  # We need x and y for the dot in the middle but we don't want horizontal line to be visible
+        self.curves['current_frac'].set_legend(self.legend)
+        self.curves['current_frac'].set_plotitem(self.plt)
+
+        # Show data and legend
+        for curve in self.curves:
+            self.show_data(curve)
+
+    def set_data(self, data):
+
+        # Meta data and data
+        _meta, _data = data['meta'], data['data']
+
+        # Store currrent fraction
+        self._data['fraction'] = _data
+
+        # Histogram fraction
+        hist_idx = np.searchsorted(self._data['edges'], _data)
+        try:
+            self._data['hist'][hist_idx] += 1
+            self._data['hist_idx'] = hist_idx
+            self._data_is_set = True
+        except IndexError:
+            logging.debug("Histogram index {} out of bounds for shape {}".format(hist_idx, *self._data['hist'].shape))
+
+    def _set_stats(self):
+        """Show curve statistics for active_curves which have been clicked or are hovered over"""
+
+        current_actives = [curve for curve in self.active_curves if self.active_curves[curve]]
+
+        if not current_actives:
+            return
+
+        n_actives = len(current_actives)
+
+        # Update text for statistics widget
+        current_stat_text = 'Curve stats of {} curve{}:\n'.format(n_actives, '' if n_actives == 1 else 's')
+
+        # Loop over active curves and create current stats
+        for curve in current_actives:
+
+            current_stat_text += '  '
+
+            # Histogram stats
+            if 'hist' in curve:
+                try:
+                    mean = np.average(self._data['centers'], weights=self._data['hist'])
+                    std = np.sqrt(np.average((self._data['centers'] - mean)**2, weights=self._data['hist']))
+                except ZeroDivisionError:  # Weights sum up to 0; no histogram entries
+                    mean = std = np.nan
+                current_stat_text += curve + u': ({:.2f} \u00B1 {:.2f}) {}'.format(mean, std, self.plt.getAxis('bottom').labelUnits)
+
+            else:
+                current_stat_text += curve + u': {:.2f} {}'.format(self._data['fraction'], self.plt.getAxis('bottom').labelUnits)
+
+            current_stat_text += '\n' if curve != current_actives[-1] else ''
+
+        # Set color and text
+        current_stat_color = (100, 100, 100)
+        self.stats_text.fill = pg.mkBrush(color=current_stat_color, style=pg.QtCore.Qt.SolidPattern)
+        self.stats_text.setText(current_stat_text)
+
+    def refresh_plot(self):
+        """Refresh the plot. This method is supposed to be connected to the timeout-Signal of a QTimer"""
+
+        # test if 'set_data' has been called
+        if self._data_is_set:
+            for curve in self.curves:
+
+                if curve == 'hist':
+                    self.curves[curve].setData(x=self._data['edges'], y=self._data['hist'], stepMode=True)
+                if curve == 'current_frac':
+                    self.curves[curve].set_position(x=self._data['hist_idx'] + 0.5, y=self._data['hist'][self._data['hist_idx']])
+
+            if self._show_stats:
+                self._set_stats()

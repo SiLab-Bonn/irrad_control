@@ -3,11 +3,12 @@ import os
 import time
 import logging
 import subprocess
-from PyQt5 import QtWidgets, QtCore
+from PyQt5 import QtWidgets, QtCore, QtGui
 from irrad_control import network_config, daq_config, config_path
 from irrad_control.devices.adc import ads1256
-from irrad_control.utils import Worker, log_levels
-from irrad_control.gui.widgets import GridContainer
+from irrad_control.utils.logger import log_levels
+from irrad_control.utils.worker import Worker
+from irrad_control.gui.widgets import GridContainer, NoBackgroundScrollArea
 from collections import OrderedDict
 
 _ro_scales = OrderedDict([('1 %sA' % u'\u03bc', 1000.0), ('0.33 %sA' % u'\u03bc', 330.0),
@@ -20,12 +21,17 @@ def _fill_combobox_items(cbx, fill_dict):
     default_idx = 0
     _all = fill_dict['all']
 
+    # Clear initially
+    cbx.clear()
+
     # Add entire Info to tooltip e.g. date of measured constant, sigma, etc.
     for i, k in enumerate(sorted(_all.keys())):
         if 'hv_sem' in _all[k]:
             cbx.insertItem(i, '{} ({}, HV: {})'.format(_all[k]['nominal'], k, _all[k]['hv_sem']))
-        else:
+        elif 'nominal' in _all[k]:
             cbx.insertItem(i, '{} ({})'.format(_all[k]['nominal'], k))
+        else:
+            cbx.insertItem(i, k)
         tool_tip = ''
         for l in _all[k]:
             tool_tip += '{}: {}\n'.format(l, _all[k][l])
@@ -111,15 +117,8 @@ class IrradSetupTab(QtWidgets.QWidget):
         self.btn_ok.setEnabled(False)
 
         self.left_widget.layout().addWidget(self.btn_ok)
-
-        # Right side
-        scroll_server = QtWidgets.QScrollArea()
-        scroll_server.setWidgetResizable(True)
-        scroll_server.setWidget(self.server_setup)
-        # self.server_setup.setMinimumSize(800, 780)
-
         self.right_widget.layout().addWidget(QtWidgets.QLabel('Selected server(s)'))
-        self.right_widget.layout().addWidget(scroll_server)
+        self.right_widget.layout().addWidget(self.server_setup)
 
         # Connect
         self.irrad_setup.setupValid.connect(self._check_setup)
@@ -142,10 +141,6 @@ class IrradSetupTab(QtWidgets.QWidget):
         with open(self.setup['session']['outfile'] + '.yaml', 'w') as _setup:
             yaml.safe_dump(self.setup, _setup, default_flow_style=False)
 
-        # Open the network_config.yaml and overwrites it with current server_ips
-        with open(os.path.join(config_path, 'network_config.yaml'), 'w') as nc:
-            yaml.safe_dump(network_config, nc, default_flow_style=False)
-
     def update_setup(self):
         """Update the info into the setup dict"""
 
@@ -159,7 +154,6 @@ class IrradSetupTab(QtWidgets.QWidget):
 
         # Network
         self.setup['host'] = self.irrad_setup.setup_widgets['network'].widgets['host_edit'].text()
-        self.setup['port'] = network_config['ports']
 
         # Server
         self.setup['server'] = {}
@@ -519,6 +513,9 @@ class ServerSetupWidget(QtWidgets.QWidget):
         # The main layout for this widget
         self.setLayout(QtWidgets.QVBoxLayout())
 
+        # No margins
+        self.layout().setContentsMargins(0, 0, 0, 0)
+
         # Tabs for each available server
         self.tabs = QtWidgets.QTabWidget()
         self.layout().addWidget(self.tabs)
@@ -598,9 +595,13 @@ class ServerSetupWidget(QtWidgets.QWidget):
         # Store widgets
         self.setup_widgets[ip] = {'device': device_setup, 'temp': temp_setup, 'daq': daq_setup, 'adc': adc_setup}
 
+        # Make scroll widget and set widget
+        scroll_server = NoBackgroundScrollArea()
+        scroll_server.setWidget(_widget)
+
         # Finally, add to tab bar
         self.tab_widgets[ip] = _widget
-        self.tabs.addTab(_widget, name)
+        self.tabs.addTab(scroll_server, name)
 
     def _validate_setup(self):
         """Check if all necessary input is ready to continue"""
