@@ -1,6 +1,6 @@
 ---
-layout: single
 classes: wide
+layout: default
 ---
 
 [Silizium Labor Bonn](https://github.com/SiLab-Bonn)
