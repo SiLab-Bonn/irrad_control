@@ -1,5 +1,4 @@
 ---
-classes: wide
 layout: default
 ---
 
