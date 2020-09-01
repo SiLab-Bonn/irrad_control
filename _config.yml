@@ -6,7 +6,7 @@ title: Proton Irradiation at Bonn University
 description: Thomas, you should update this now!!
 #/figs/silab_logo.png
 # Logo to be displayed on main page
-logo: /figs/silab_logo.png
+description: /figs/silab_logo.png
 
 # Better markdown app
 markdown: kramdown
