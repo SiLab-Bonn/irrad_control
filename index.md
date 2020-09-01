@@ -3,7 +3,7 @@ layout: default
 ---
 
 [Silizium Labor Bonn](https://github.com/SiLab-Bonn)
-# ![Logo of Silab](/figs/silab_logo.png)
+
 
 ( Last modified: {{ site.time | date: '%B %d, %Y' }} )
 
