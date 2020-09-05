@@ -1,6 +1,5 @@
 import logging
 from time import time
-from threading import Thread
 from serial import SerialException
 from irrad_control.utils.daq_proc import DAQProcess
 from irrad_control.devices.adc.ADS1256_definitions import *
@@ -23,7 +22,7 @@ class IrradServer(DAQProcess):
                     'temp': [],
                     'server': ['start', 'shutdown'],
                     'stage': ['move_rel', 'move_abs', 'prepare', 'scan', 'finish', 'stop', 'pos', 'home',
-                              'set_speed', 'get_speed', 'no_beam', 'set_range', 'get_range']
+                              'set_speed', 'get_speed', 'no_beam', 'set_range', 'get_range', 'add_pos', 'del_pos', 'move_pos', 'get_pos']
                     }
 
         # Call init of super class
@@ -103,10 +102,7 @@ class IrradServer(DAQProcess):
                 self.adc_channels.append(tmp_ch)
 
             # Start data sending thread
-            daq_thread = Thread(target=self._daq_adc)
-            daq_thread.start()
-
-            self.threads.append(daq_thread)
+            self.launch_thread(target=self._daq_adc)
 
         except IOError:
             logging.error("Could not access SPI device file. Enable SPI interface!")
@@ -143,10 +139,7 @@ class IrradServer(DAQProcess):
             self.temp_sens = ArduinoTempSens(port="/dev/ttyUSB1")  # TODO: pass port as arg in device setup
 
             # Start data sending thread
-            daq_thread = Thread(target=self._daq_temp)
-            daq_thread.start()
-
-            self.threads.append(daq_thread)
+            self.launch_thread(target=self._daq_temp)
 
         except SerialException:
             logging.error("Could not connect to port {}. Maybe it is used by another process?".format("/dev/ttyUSB1"))
@@ -178,6 +171,10 @@ class IrradServer(DAQProcess):
         try:
             # Init stage
             self.xy_stage = ZaberXYStage(serial_port='/dev/ttyUSB0')  # TODO: pass port as arg in device setup
+
+            # Setup zmq for the stage to publish data
+            self.xy_stage.setup_zmq(ctx=self.context, skt=self.socket_type['data'], addr=self._internal_sub_addr, sender=self.server)
+
         except SerialException:
             logging.error("Could not connect to port {}. Maybe it is used by another process?".format("/dev/ttyUSB0"))
             logging.warning("XYStage removed from server devices")
@@ -247,7 +244,7 @@ class IrradServer(DAQProcess):
                 self._send_reply(reply=cmd, _type='STANDARD', sender=target, data=_data)
 
             elif cmd == 'prepare':
-                self.xy_stage.prepare_scan(data_out=self.create_internal_data_pub(), server=self.server, **data)
+                self.xy_stage.prepare_scan(server=self.server, **data)
                 _data = {'n_rows': self.xy_stage.scan_params['n_rows'], 'rows': self.xy_stage.scan_params['rows']}
 
                 self._send_reply(reply=cmd, _type='STANDARD', sender=target, data=_data)
@@ -267,6 +264,18 @@ class IrradServer(DAQProcess):
                 _data = [self.xy_stage.steps_to_distance(pos, unit='mm') for pos in self.xy_stage.position]
                 self._send_reply(reply=cmd, _type='STANDARD', sender=target, data=_data)
 
+            elif cmd == 'get_pos':
+                self._send_reply(reply=cmd, _type='STANDARD', sender=target, data=self.xy_stage.config['positions'])
+
+            elif cmd == 'add_pos':
+                self.xy_stage.add_position(**data)
+
+            elif cmd == 'del_pos':
+                self.xy_stage.remove_position(data)
+
+            elif cmd == 'move_pos':
+                self.xy_stage.move_to_position(**data)
+
             elif cmd == 'get_speed':
                 speed = [self.xy_stage.get_speed(a, unit='mm/s') for a in (self.xy_stage.x_axis, self.xy_stage.y_axis)]
                 self._send_reply(reply=cmd, _type='STANDARD', sender=target, data=speed)
@@ -282,16 +291,19 @@ class IrradServer(DAQProcess):
 
             elif cmd == 'no_beam':
                 if data:
-                    if not self.xy_stage.no_beam.is_set():
-                        self.xy_stage.no_beam.set()
+                    if not self.xy_stage.pause_scan.is_set():
+                        self.xy_stage.pause_scan.set()
                 else:
-                    if self.xy_stage.no_beam.is_set():
-                        self.xy_stage.no_beam.clear()
+                    if self.xy_stage.pause_scan.is_set():
+                        self.xy_stage.pause_scan.clear()
                 self._send_reply(reply=cmd, _type='STANDARD', sender=target, data=data)
 
     def clean_up(self):
         """Mandatory clean up - method"""
-        pass  # Nothing to clean up once threads have finished
+        try:
+            del self.xy_stage
+        except NameError:
+            pass
 
 
 def main():

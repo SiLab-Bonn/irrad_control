@@ -28,7 +28,7 @@ class PlotWindow(QtWidgets.QMainWindow):
         # Window appearance settings
         self.setWindowTitle(type(plot).__name__)
         self.screen = QtWidgets.QDesktopWidget().screenGeometry()
-        self.setMinimumSize(0.75 * self.screen.width(), 0.75 * self.screen.height())
+        self.setMinimumSize(0.25 * self.screen.width(), 0.25 * self.screen.height())
         self.setAttribute(QtCore.Qt.WA_DeleteOnClose)
         
         # Set plot as central widget
@@ -1127,11 +1127,14 @@ class FluenceHist(IrradPlotWidget):
         if self._data_is_set:
             for curve in self.curves:
                 if curve == 'hist':
-                    self.curves[curve].setData(x=self._data['hist_rows'], y=self._data['hist'], stepMode=True)
-                    self.curves['mean'].setValue(self._data['hist_mean'])
-                    self.p_label.setFormat('Mean: ({:.2E} +- {:.2E}) protons / cm^2'.format(self._data['hist_mean'], self._data['hist_std']))
-                    self.n_label.setFormat('Mean: ({:.2E} +- {:.2E}) neq / cm^2'.format(*[x * self.irrad_setup['kappa'] for x in (self._data['hist_mean'],
-                                                                                                                                  self._data['hist_std'])]))
+                    try:
+                        self.curves[curve].setData(x=self._data['hist_rows'], y=self._data['hist'], stepMode=True)
+                        self.curves['mean'].setValue(self._data['hist_mean'])
+                        self.p_label.setFormat('Mean: ({:.2E} +- {:.2E}) protons / cm^2'.format(self._data['hist_mean'], self._data['hist_std']))
+                        self.n_label.setFormat('Mean: ({:.2E} +- {:.2E}) neq / cm^2'.format(*[x * self.irrad_setup['kappa'] for x in (self._data['hist_mean'],
+                                                                                                                                      self._data['hist_std'])]))
+                    except Exception as e:
+                        logging.warning('Fluence histogram exception: {}'.format(e.message))
 
                 elif curve == 'points':
                     self.curves[curve].setData(x=self._data['hist_rows'][:-1] + 0.5, y=self._data['hist'])

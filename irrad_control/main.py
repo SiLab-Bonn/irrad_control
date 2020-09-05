@@ -12,7 +12,7 @@ from threading import Event
 
 # Package imports
 from irrad_control.utils.logger import CustomHandler, LoggingStream, log_levels
-from irrad_control.utils.worker import Worker
+from irrad_control.utils.worker import QtWorker
 from irrad_control.utils.proc_manager import ProcessManager
 from irrad_control.gui.widgets import DaqInfoWidget, LoggingWidget
 from irrad_control.gui.tabs import IrradSetupTab, IrradControlTab, IrradMonitorTab
@@ -255,10 +255,10 @@ class IrradControlWin(QtWidgets.QMainWindow):
     def _init_recv_threads(self):
 
         # Start receiving log messages from other processes
-        self.threadpool.start(Worker(func=self.recv_log))
+        self.threadpool.start(QtWorker(func=self.recv_log))
 
         # Start receiving data from other processes
-        self.threadpool.start(Worker(func=self.recv_data))
+        self.threadpool.start(QtWorker(func=self.recv_data))
 
     def _init_processes(self):
 
@@ -269,7 +269,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
             self.proc_mngr.connect_to_server(hostname=server, username='pi')
 
             # Prepare server in QThread on init
-            server_config_workers[server] = Worker(func=self.proc_mngr.configure_server, hostname=server, branch='development', git_pull=True)
+            server_config_workers[server] = QtWorker(func=self.proc_mngr.configure_server, hostname=server, branch='master', git_pull=True)
 
             # Connect workers finish signal to starting process on server
             server_config_workers[server].signals.finished.connect(lambda _server=server: self.start_server(_server))
@@ -333,7 +333,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
             # All servers have been launched; start collecting info
             if all(server in self.proc_mngr.launched_procs for server in self.setup['server']):
-                proc_info_worker = Worker(func=self.collect_proc_infos)
+                proc_info_worker = QtWorker(func=self.collect_proc_infos)
                 proc_info_worker.signals.finished.connect(self._init_recv_threads)
                 proc_info_worker.signals.finished.connect(self.send_start_cmd)
                 self.threadpool.start(proc_info_worker)
@@ -370,7 +370,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
         self._start_daq_proc(hostname='localhost')
 
     def _connect_worker_exception(self, worker):
-        worker.signals.exceptionSignal.connect(lambda e, trace: logging.error("{} on sub-thread: {}".format(type(e).__name__, trace)))
+        worker.signals.exception.connect(lambda e, trace: logging.error("{} on sub-thread: {}".format(type(e).__name__, trace)))
 
     def _connect_worker_close(self, worker, hostname):
         self._cmd_reply[hostname].append(self._cmd_id)
@@ -395,7 +395,9 @@ class IrradControlWin(QtWidgets.QMainWindow):
         self.control_tab.enableDAQRec.connect(lambda server, enable: self.daq_info_widget.record_btns[server].setVisible(enable))
         self.control_tab.enableDAQRec.connect(
             lambda server, enable: self.daq_info_widget.record_btns[server].clicked.connect(
-                lambda _, _server=server: self.control_tab.send_cmd(target='interpreter', cmd='record_data', cmd_data=_server))
+                lambda _, _server=server: self.control_tab.send_cmd(target='interpreter',
+                                                                    cmd='record_data',
+                                                                    cmd_data=(_server, self.daq_info_widget.record_btns[server].text() == 'Resume')))
             if enable else self.daq_info_widget.record_btns[server].clicked.disconnect())  # Pretty crazy connection. Basically connects or disconnects a button
 
         # Make temporary dict for updated tabs
@@ -451,19 +453,46 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
         elif data['meta']['type'] == 'stage':
 
-            if data['data']['status'] == 'start':
-                self.control_tab.update_info(position=[data['data']['x_start'], data['data']['y_start']], unit='mm')
-                self.control_tab.update_scan_parameters(scan=data['data']['scan'], row=data['data']['row'])
-                self.control_tab.update_scan_parameters(scan_speed=data['data']['speed'], unit='mm/s')
-                self.control_tab.update_info(status='Scanning...')
+            if data['data']['status'] == 'scan_init':  # Scan is being initialized
 
-            elif data['data']['status'] == 'stop':
-                self.control_tab.update_info(position=[data['data']['x_stop'], data['data']['y_stop']], unit='mm')
-                self.control_tab.update_info(status='Turning')
+                # Start data recording when scan starts, regardless whether recording was turned off
+                self.send_cmd(hostname='localhost', target='interpreter', cmd='record_data', cmd_data=(server, True))
 
-            elif data['data']['status'] == 'finished':
+                # Disable all record buttons when scan starts
+                self.control_tab.daq_widget.widgets['rec_btns'][server].setEnabled(False)
+                self.daq_info_widget.record_btns[server].setEnabled(False)
 
+            elif data['data']['status'] in ('move_start', 'move_stop'):  # Stage started / stopped movement
+
+                new_pos = self.control_tab.stage_attributes['position'][:]
+                new_pos[data['data']['axis']] = data['data']['pos'] * 1e3
+                self.control_tab.update_info(position=new_pos, unit='mm')
+
+                if data['data']['status'] == 'move_start':
+                    for entry in ('accel', 'range', 'speed'):
+                        new_entry = self.control_tab.stage_attributes[entry][:]
+                        # Units in Si: meter to millimeter
+                        if entry == 'range':
+                            new_entry[data['data']['axis']] = [d*1e3 for d in data['data'][entry]]
+                        else:
+                            new_entry[data['data']['axis']] = data['data'][entry] * 1e3
+                        self.control_tab.update_info(**{entry: new_entry, 'unit': 'mm' if entry == 'range' else 'mm/s' if entry == 'speed' else 'mm/s2'})
+
+            elif data['data']['status'] in ('scan_start', 'scan_stop'):
+
+                self.control_tab.update_info(status='Scanning' if data['data']['status'] == 'scan_start' else 'Turning')
+
+                if data['data']['status'] == 'scan_start':
+                    # Update control
+                    self.control_tab.update_scan_parameters(scan=data['data']['scan'], row=data['data']['row'])
+                    self.control_tab.update_scan_parameters(scan_speed=data['data']['speed'], unit='mm/s')
+
+            elif data['data']['status'] == 'scan_finished':
                 self.control_tab.scan_status(data['data']['status'])
+
+                # Enable all record buttons when scan is over
+                self.control_tab.daq_widget.widgets['rec_btns'][server].setEnabled(True)
+                self.daq_info_widget.record_btns[server].setEnabled(True)
 
         elif data['meta']['type'] == 'temp':
 
@@ -479,7 +508,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
             return
 
         cmd_dict = {'target': target, 'cmd': cmd, 'data': cmd_data}
-        cmd_worker = Worker(self._send_cmd_get_reply, hostname, cmd_dict)
+        cmd_worker = QtWorker(self._send_cmd_get_reply, hostname, cmd_dict)
 
         # Make connections
         self._connect_worker_exception(worker=cmd_worker)
@@ -532,6 +561,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
                         self.send_cmd(hostname, 'stage', 'pos')
                         self.send_cmd(hostname, 'stage', 'get_speed')
                         self.send_cmd(hostname, 'stage', 'get_range')
+                        self.send_cmd(hostname, 'stage', 'get_pos')
 
                 elif reply == 'shutdown':
 
@@ -560,7 +590,7 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
             elif sender == 'stage':
 
-                if reply in ['pos', 'move_rel', 'move_abs']:
+                if reply == 'pos':
                     self.control_tab.update_info(position=reply_data, unit='mm')
 
                 elif reply in ['set_speed', 'get_speed']:
@@ -568,6 +598,15 @@ class IrradControlWin(QtWidgets.QMainWindow):
 
                 elif reply in ['set_range', 'get_range']:
                     self.control_tab.update_info(range=reply_data, unit='mm')
+
+                elif reply == 'get_pos':
+                    self.control_tab.setup_xy_stage_positions(reply_data)
+
+                elif reply == 'add_pos':
+                    dd = self.control_tab.xy_stage_position_win.edit_pos.widgets
+                    for name in dd:
+                        dd[name][-2].setText('Saved')
+                        dd[name][-2].setStyleSheet('QLabel {color: black;}')
 
                 elif reply == 'prepare':
                     self.control_tab.update_scan_parameters(**reply_data)

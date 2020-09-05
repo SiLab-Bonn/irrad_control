@@ -1,11 +1,84 @@
 import logging
 from threading import Thread, Event
-from time import time, sleep
+import time
+import yaml
 from zaber.serial import *
 from collections import OrderedDict
+from functools import wraps
+from irrad_control import xy_stage_config, xy_stage_config_yaml
 
 
-class ZaberXYStage:
+def movement_tracker(movement_func):
+    """
+    Decorator function which is used keep track of the stage travel. Optionally publishes movement data via ZMQ.
+
+    Parameters
+    ----------
+    movement_func: function object
+        function which executes a stage movement
+
+    Returns
+    -------
+    movement_wrapper: function object
+        wrapped movement_func
+    """
+    @wraps(movement_func)
+    def movement_wrapper(self, target, axis, unit=None):
+
+        # Axis index and name
+        axis_idx = 0 if axis is self.x_axis else 1
+        axis_name = 'x' if axis is self.x_axis else 'y'
+
+        # Get current position in meters
+        start = self.steps_to_distance(self.position[axis_idx], unit='m')
+
+        if self._zmq_setup:
+
+            # Publish collection of data from which movement can be predicted
+            _meta = {'timestamp': time.time(), 'name': self.zmq_config['sender'], 'type': 'stage'}
+            _data = {'status': 'move_start', 'pos': start, 'axis': axis_idx, 'unit': unit,
+                     'speed': self.get_speed(axis, unit='m/s'),
+                     'accel': self.get_accel(axis, unit='m/s2'),
+                     'range': self.get_range(axis, unit='m')}
+
+            # Publish data
+            self._move_pub.send_json({'meta': _meta, 'data': _data})
+
+        # Execute movement
+        reply = movement_func(self, target, axis, unit)
+
+        # Get position after movement
+        stop = self.steps_to_distance(self.position[axis_idx], unit='m')
+
+        # Calculate distance travelled in meter
+        travel = abs(stop - start)
+
+        if self._zmq_setup:
+
+            # Publish collection of data from which movement can be predicted
+            _meta = {'timestamp': time.time(), 'name': self.zmq_config['sender'], 'type': 'stage'}
+            _data = {'status': 'move_stop', 'pos': stop, 'axis': axis_idx, 'travel': travel, 'unit': unit}
+
+            # Publish data
+            self._move_pub.send_json({'meta': _meta, 'data': _data})
+
+        # Update interval and total travel
+        self.config['interval_travel'][axis_name] += travel
+        self.config['total_travel'][axis_name] += travel
+
+        if self.config['interval_travel'][axis_name] >= self.config['maintenance_interval']:
+            self.config['interval_travel'][axis_name] = 0
+            logging.warning("{}-axis of XY-stage reached service interval travel! "
+                            "See https://www.zaber.com/wiki/Manuals/X-LRQ-E#Precautions".format(axis_name))
+
+        self.config['last_update'] = time.asctime()
+
+        return reply
+
+    return movement_wrapper
+
+
+class ZaberXYStage(object):
     """Class for interfacing the Zaber XY-stage of the irradiation setup at Bonn isochronous cyclotron"""
 
     def __init__(self, serial_port='/dev/ttyUSB0'):
@@ -50,7 +123,7 @@ class ZaberXYStage:
         self.scan_params = {}  # Dict to hold relevant scan parameters
         self.stop_scan = Event()  # Event to stop scan
         self.finish_scan = Event()  # Event to finish a scan after completing all rows of current iteration
-        self.no_beam = Event()  # Event to wait if beam current is low of beam is shut off
+        self.pause_scan = Event()  # Event to wait while scanning if e.g. beam current is low or beam is shut off
 
         # Units
         self.dist_units = OrderedDict([('mm', 1.0), ('cm', 1e1), ('m', 1e3)])
@@ -60,6 +133,57 @@ class ZaberXYStage:
         # Set speeds on both axis to reasonable values: 10 mm / s
         self.set_speed(10, self.x_axis, unit='mm/s')
         self.set_speed(10, self.y_axis, unit='mm/s')
+
+        # Attributes related to ZMQ data publishing
+        self.zmq_config = {}
+        self._move_pub = None
+        self._zmq_setup = False
+
+        # XY Stage config
+        self.config = xy_stage_config
+        
+    def __del__(self):
+        """Store the current configuration on deletion and close socket if ZMQ was set up"""
+        self.save_config()
+        # Close socket
+        if self._zmq_setup:
+            self._move_pub.close()
+
+    def setup_zmq(self, ctx, skt, addr, sender=None):
+        """
+        Method to pass a ZMQ context to the stage class in order to allow it to publish data on a socket
+
+        Parameters
+        ----------
+        ctx: zmq.Context instance
+            A ZMQ context instance from which sockets can be created
+        skt: zmq.PUB
+            A ZMQ publisher socket
+        addr: str
+            A ZMQ address to connect to. Must be a valid combination of protocol, address and port
+        sender: str, None
+            Name of the device from which the stage is interfaced
+        """
+
+        if not hasattr(ctx, 'socket'):
+            raise ValueError("ZMQ context instance must have 'socket' method")
+
+        if not isinstance(skt, int):
+            raise ValueError("ZMQ socket type must be of type 'int'")
+
+        if not isinstance(addr, str):
+            raise ValueError("ZMQ address must be of type 'str'")
+
+        # Make publisher for movements
+        self._move_pub = ctx.socket(skt)
+        self._move_pub.set_hwm(10)
+        self._move_pub.connect(addr)
+
+        # Store
+        self.zmq_config.update({'ctx': ctx, 'skt': skt, 'addr': addr, 'sender': sender})
+
+        # Set flag
+        self._zmq_setup = True
 
     def _check_reply(self, reply):
         """Method to check the reply of a command which has been issued to one of the axes"""
@@ -281,7 +405,7 @@ class ZaberXYStage:
 
         return _range if unit is None else [self.steps_to_distance(r, unit) for r in _range]
 
-    def accel_to_step_s2(self, accel, unit="mm/s^2"):
+    def accel_to_step_s2(self, accel, unit="mm/s2"):
         """
         Method to convert acceleration *accel* given in *unit* into micro steps per square second
 
@@ -427,25 +551,26 @@ class ZaberXYStage:
         # Check if unit is sane; if it checks out, return same unit, else returns smallest available unit
         unit = self._check_unit(unit, self.dist_units)
 
-        return float(steps * self.microstep * self.dist_units[unit] / 1e-3)
+        return float(steps * self.microstep * 1e3 / self.dist_units[unit])
 
-    def move_relative(self, distance, axis, unit=None):
+    @movement_tracker
+    def move_relative(self, target, axis, unit=None):
         """
         Method to move either in vertical or horizontal direction relative to the current position.
         Does sanity check on travel destination and axis
 
         Parameters
         ----------
-        distance : float
-            distance of travel
+        target : float, int
+            distance of relative travel
         axis : zaber.serial.AsciiAxis
             either self.x_axis or self.y_axis
         unit : None, str
-            unit in which distance is given. Must be in self.dist_units. If None, interpret as steps
+            unit in which target is given. Must be in self.dist_units. If None, interpret as steps
         """
 
         # Get distance in steps
-        dist_steps = distance if unit is None else self.distance_to_steps(distance, unit)
+        dist_steps = target if unit is None else self.distance_to_steps(target, unit)
 
         # Get current position
         curr_pos = axis.get_position()
@@ -471,22 +596,23 @@ class ZaberXYStage:
 
         return _reply
 
-    def move_absolute(self, position, axis, unit=None):
+    @movement_tracker
+    def move_absolute(self, target, axis, unit=None):
         """
         Method to move along the given axis to the absolute position
 
         Parameters
         ----------
-        position : float, int
-            distance of travel in steps or float with a unit
+        target : float, int
+            position to which will be travelled in steps or float with a unit
         axis : zaber.serial.AsciiAxis
             either self.x_axis or self.y_axis
         unit : None, str
-            unit in which distance is given. Must be in self.dist_units. If None, interpret as steps
+            unit in which target is given. Must be in self.dist_units. If None, interpret as steps
         """
 
         # Get position in steps
-        pos_steps = position if unit is None else self.distance_to_steps(position, unit)
+        pos_steps = target if unit is None else self.distance_to_steps(target, unit)
 
         # Get minimum and maximum steps of travel
         min_step, max_step = int(axis.send("get limit.min").data), int(axis.send("get limit.max").data)
@@ -505,7 +631,116 @@ class ZaberXYStage:
 
         return _reply
 
-    def prepare_scan(self, rel_start_point, rel_end_point, scan_speed, step_size, data_out, server):
+    def move_to_position(self, x=None, y=None, unit=None, name=None):
+        """
+        Method which moves the stage to a given position: Position can either be defined by giving *x* and *y* values
+        with a *unit* or a *name*. If a *name* is given, it must be contained in the self.config['positions']. If a
+        a name as well as x and y values are given, the name is prioritized.
+
+        Parameters
+        ----------
+        x: float, int
+            x value of the position given in *unit*
+        y: float, int
+            y value of the position given in *unit*
+        unit: str, None
+             string of unit to use. Must be in self.dist_units. If None, x and y must be integers and the unit is interpreted as steps
+        name: str
+            name of position in self.config['positions'] to travel to
+        """
+
+        if name is None and any(val is None for val in (x, y)):
+            raise ValueError("Either the 'x' and 'y' arguments or the name of the position have to be given")
+
+        # If we're moving to an already known position
+        if name is not None:
+
+            # Check if position is in config
+            if name not in self.config['positions']:
+                raise KeyError("Position '{}' not in known position: {}".format(name, ', '.join(n for n in self.config['positions'])))
+
+            # Update values
+            x, y, unit = [self.config['positions'][name][k] for k in ('x', 'y', 'unit')]
+
+        # I'm ashamed
+        # FIXME: start using ncoder bit to invert y axis instead of coding like trhe first human
+        m_dist = self.steps_to_distance(int(300e-3 / self.microstep), unit=unit)
+        y = m_dist - y
+
+        # Do the movement; first move x, then y axis
+        self.move_absolute(x, self.x_axis, unit=unit)
+        self.move_absolute(y, self.y_axis, unit=unit)
+
+    def add_position(self, name, x, y, unit, date=None):
+        """
+        Method which stores new XY stage position in the config. If it already exists in self.config['positions'], the entries are updated
+
+        Parameters
+        ----------
+        name: str
+            name of the position
+        x: float
+            x position
+        y: float
+            y position
+        unit: str
+            string of metric unit
+        date: str, None
+            if None, will be return value of time.asctime()
+        """
+
+        # Position info dict
+        new_pos = {'x': x, 'y': y, 'unit': unit, 'date': time.asctime() if date is None else date}
+
+        # We're updating an existing position
+        if name in self.config['positions']:
+
+            logging.debug('Updating position {} (Last update {})'.format(name, self.config['positions'][name]['date']))
+
+            # Update directly in dict
+            self.config['positions'][name].update(new_pos)
+
+        # We're adding a new position
+        else:
+
+            logging.debug('Adding position {}!'.format(name))
+
+            self.config['positions'][name] = new_pos
+
+    def remove_position(self, name):
+        """
+        Method which removes an existing XY stage position from self.config['positions']
+
+        Parameters
+        ----------
+        name: str
+            name of the position
+        """
+
+        if name in self.config['positions']:
+            del self.config['positions'][name]
+        else:
+            logging.warning('Position {} unknown and therefore cannot be removed.'.format(name))
+
+    def save_config(self):
+        """
+        Method save the content of self.config aka irrad_control.xy_stage_config to the respective config yaml (overwriting it).
+        This method get's called inside the instances' destructor.
+        """
+
+        try:
+            logging.info('Updating XY-Stage positions')
+
+            # Overwrite xy stage stats
+            with open(xy_stage_config_yaml, 'w') as _xys_w:
+                yaml.safe_dump(self.config, _xys_w, default_flow_style=False)
+
+            logging.info('Successfully updated XY-Stage configuration')
+
+        except (OSError, IOError):
+            logging.warning("Could not update XY-Stage configuration file at {}. Maybe it is opened by another process?".format(xy_stage_config_yaml))
+
+    def prepare_scan(self, rel_start_point, rel_end_point, scan_speed, step_size, server):
         """
         Prepares a scan by storing all needed info in self.scan_params
 
@@ -518,9 +753,7 @@ class ZaberXYStage:
         scan_speed : float
             horizontal scan speed in mm / s
         step_size : float
-            stepp size of vertical steps in mm
-        data_out : zmq socket
-            Socket which published data to during scan
+            step size of vertical steps in mm
         server : str
             IP address of server which controls the stage
         """
@@ -541,7 +774,6 @@ class ZaberXYStage:
         # Store input args
         self.scan_params['speed'] = scan_speed
         self.scan_params['step_size'] = step_size
-        self.scan_params['data_out'] = data_out
         self.scan_params['server'] = server
 
         # Calculate number of rows for the scan
@@ -571,8 +803,7 @@ class ZaberXYStage:
             return False
 
         # Check if scan_params dict contains all necessary info
-        scan_reqs = ('origin', 'start_pos', 'end_pos', 'n_rows', 'rows',
-                     'speed', 'step_size', 'data_out', 'server')
+        scan_reqs = ('origin', 'start_pos', 'end_pos', 'n_rows', 'rows', 'speed', 'step_size', 'server')
         missed_reqs = [req for req in scan_reqs if req not in scan_params]
 
         # Return if info is missing
@@ -616,7 +847,7 @@ class ZaberXYStage:
             return
 
         # Start scan in separate thread
-        scan_thread = Thread(target=self._scan_row, args=(row, speed, scan_params))
+        scan_thread = Thread(target=self._scan_row, args=(row, scan_params, speed))
         scan_thread.start()
 
     def scan_device(self, scan_params=None):
@@ -643,7 +874,7 @@ class ZaberXYStage:
         scan_thread = Thread(target=self._scan_device, args=(scan_params, ))
         scan_thread.start()
 
-    def _scan_row(self, row, scan_params, speed=None, scan=-1, data_out=None):
+    def _scan_row(self, row, scan_params, speed=None, scan=-1, data_pub=None):
         """
         Method which is called by self._scan_device or self.scan_row. See docstrings there.
 
@@ -657,9 +888,18 @@ class ZaberXYStage:
             Scan speed in mm/s or None. If None, current speed of x-axis is used for scanning
         scan : int
             Integer indicating the scan number during self.scan_device. *scan* for single rows is -1
-        data_out : zmq socket, None
-            Socket on which data is published. If None, no data is published
+        data_pub : zmq socket, None
+            Socket on which data is published. If None, check if a socket can be created, if not, no data is published
         """
+
+        # Check socket, if no socket is given and ZMQ is setup for this instance, open one
+        socket_close = data_pub is None and self._zmq_setup is True
+
+        # If we're closing the socket, we have to open one before
+        if socket_close:
+            data_pub = self.zmq_config['ctx'].socket(self.zmq_config['skt'])
+            data_pub.set_hwm(10)
+            data_pub.connect(self.zmq_config['addr'])
 
         # Check whether this method is called from within self.scan_device or single row is scanned.
         # If single row is scanned, we're coming from
@@ -688,16 +928,18 @@ class ZaberXYStage:
             msg = "Y-axis did not move to row {}. Abort.".format(row)
             raise UnexpectedReplyError(msg)
 
-        # Publish data
-        if data_out is not None:
+        # Publish if we have a socket
+        if data_pub is not None:
 
-            _meta = {'timestamp': time(), 'name': scan_params['server'], 'type': 'stage'}
-            _data = {'status': 'start', 'scan': scan, 'row': row,
+            # Publish data
+            _meta = {'timestamp': time.time(), 'name': scan_params['server'], 'type': 'stage'}
+            _data = {'status': 'scan_start', 'scan': scan, 'row': row,
                      'speed': self.get_speed(self.x_axis, unit='mm/s'),
                      'x_start': self.steps_to_distance(self.position[0], unit='mm'),
                      'y_start': self.steps_to_distance(self.position[1], unit='mm')}
-            # Put
-            data_out.send_json({'meta': _meta, 'data': _data})
+
+            # Publish data
+            data_pub.send_json({'meta': _meta, 'data': _data})
 
         # Scan the current row
         x_reply = self.move_absolute(x_end if self.x_axis.get_position() == x_start else x_start, self.x_axis)
@@ -707,15 +949,20 @@ class ZaberXYStage:
             msg = "X-axis did not scan row {}. Abort.".format(row)
             raise UnexpectedReplyError(msg)
 
-        # Publish stop data
-        if data_out is not None:
+        # Publish if we have a socket
+        if data_pub is not None:
 
-            _meta = {'timestamp': time(), 'name': scan_params['server'], 'type': 'stage'}
-            _data = {'status': 'stop',
+            # Publish stop data
+            _meta = {'timestamp': time.time(), 'name': scan_params['server'], 'type': 'stage'}
+            _data = {'status': 'scan_stop',
                      'x_stop': self.steps_to_distance(self.position[0], unit='mm'),
                      'y_stop': self.steps_to_distance(self.position[1], unit='mm')}
-            # Put
-            data_out.send_json({'meta': _meta, 'data': _data})
+
+            # Publish data
+            data_pub.send_json({'meta': _meta, 'data': _data})
+
+        if socket_close:
+            data_pub.close()
 
         if from_origin:
             # Move back to origin; move y first in order to not scan over device
@@ -732,6 +979,11 @@ class ZaberXYStage:
             dict containing all the info for doing a scan of a rectangular area.
         """
 
+        # initialize zmq data publisher
+        data_pub = self.zmq_config['ctx'].socket(self.zmq_config['skt'])
+        data_pub.set_hwm(10)
+        data_pub.connect(self.zmq_config['addr'])
+
         # Move to start point
         self.move_absolute(scan_params['start_pos'][0], self.x_axis)
         self.move_absolute(scan_params['start_pos'][1], self.y_axis)
@@ -740,11 +992,11 @@ class ZaberXYStage:
         self.set_speed(scan_params['speed'], self.x_axis, unit='mm/s')
 
         # Initialize scan
-        _meta = {'timestamp': time(), 'name': scan_params['server'], 'type': 'stage'}
-        _data = {'status': 'init', 'y_step': scan_params['step_size'], 'n_rows': scan_params['n_rows']}
+        _meta = {'timestamp': time.time(), 'name': scan_params['server'], 'type': 'stage'}
+        _data = {'status': 'scan_init', 'y_step': scan_params['step_size'], 'n_rows': scan_params['n_rows']}
 
         # Put init data
-        scan_params['data_out'].send_json({'meta': _meta, 'data': _data})
+        data_pub.send_json({'meta': _meta, 'data': _data})
 
         try:
 
@@ -765,11 +1017,11 @@ class ZaberXYStage:
                         raise UnexpectedReplyError(msg)
 
                     # Wait for beam current to be sufficient / beam to be on for scan
-                    while self.no_beam.wait(1e-1):
+                    while self.pause_scan.wait(1e-1):
                         msg = "Low beam current or no beam in row {} of scan {}. " \
                               "Waiting for beam current to rise.".format(row, scan)
                         logging.warning(msg)
-                        sleep(1)
+                        time.sleep(1)
 
                         # If beam does not recover and we need to stop manually
                         if self.stop_scan.wait(1e-1):
@@ -777,7 +1029,7 @@ class ZaberXYStage:
                             raise UnexpectedReplyError(msg)
 
                     # Scan row
-                    self._scan_row(row=row, scan_params=scan_params, scan=scan, data_out=scan_params['data_out'])
+                    self._scan_row(row=row, scan_params=scan_params, scan=scan, data_pub=data_pub)
 
                 # Increment
                 scan += 1
@@ -790,11 +1042,11 @@ class ZaberXYStage:
         finally:
 
             # Put finished data
-            _meta = {'timestamp': time(), 'name': scan_params['server'], 'type': 'stage'}
-            _data = {'status': 'finished'}
+            _meta = {'timestamp': time.time(), 'name': scan_params['server'], 'type': 'stage'}
+            _data = {'status': 'scan_finished'}
 
             # Publish data
-            scan_params['data_out'].send_json({'meta': _meta, 'data': _data})
+            data_pub.send_json({'meta': _meta, 'data': _data})
 
             # Reset speeds
             self.set_speed(10, self.x_axis, unit='mm/s')
@@ -811,5 +1063,7 @@ class ZaberXYStage:
             if self.finish_scan.is_set():
                 self.finish_scan.clear()
 
-            if self.no_beam.is_set():
-                self.no_beam.clear()
+            if self.pause_scan.is_set():
+                self.pause_scan.clear()
+
+            data_pub.close()
