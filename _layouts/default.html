@@ -30,6 +30,10 @@
           {% if site.logo %}
             <img src="{{site.logo | relative_url}}" alt="Logo2" width="200"  />
           {% endif %}
+          
+          {% if site.logo %}
+            <img src="{{site.logo | relative_url}}" alt="Logo3" width="200"  />
+          {% endif %}
 
           <h1 id="project_title">{{ site.title | default: site.github.repository_name }}</h1>
           <h2 id="project_tagline">{{ site.description | default: site.github.project_tagline }}</h2>
