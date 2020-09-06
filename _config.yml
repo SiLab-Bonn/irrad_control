@@ -7,8 +7,9 @@ description: Thomas, you should update this no!!
 #/figs/silab_logo.png
 # Logo to be displayed on main page
 logo: /figs/silab_logo.png 
-logo1: /figs/silab_logo.png 
-logo2: /figs/silab_logo.png 
+logo1: /figs/ubonn_logo.png 
+logo2: /figs/pi_logo.png 
+logo3: /figs/hiskp_logo.png
 
 
 # Better markdown app
