@@ -7,10 +7,11 @@ description: Thomas, you should update this no!!
 #/figs/silab_logo.png
 # Logo to be displayed on main page
 
-logo1: /figs/ubonn_logo.jpg 
-logo2: /figs/pi_logo.png
-logo3: /figs/hiskp_logo.png
-logo: /figs/silab_logo.png
+logo: figs/Logo_Silab_PI_HISKP_UniBonn.PNG
+#logo1: /figs/ubonn_logo.jpg 
+#logo2: /figs/pi_logo.png
+#logo3: /figs/hiskp_logo.png
+#logo: /figs/silab_logo.png
 
 # Better markdown app
 markdown: kramdown
