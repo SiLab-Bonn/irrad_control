@@ -13,14 +13,15 @@ A newly-installed proton irradiation site at the [Bonn isochronous cyclotron](ht
 
 
 <h3> Setup </h3>
-<figure>
-  <img src="/figures/Radiation_1.jpg" alt="altes" width="300">
+
   <img src="/figures/Radiation_2.jpg" alt="Radiation_2" width="300">
-  <figcaption>Overview of the irradiation site at the high current room of the Bonn isochronus cyclotron. The setup consists of an insulated cooling box on a two-dimensional motor stage which is
+ 
+ 
+ verview of the irradiation site at the high current room of the Bonn isochronus cyclotron. The setup consists of an insulated cooling box on a two-dimensional motor stage which is
 mounted on a custom-made setup table. A liquid nitrogen reservoir is used to cool nitrogen gas which is guided into the
 cooling box.Shown is  the setup in irradiation position, only several centimeters from the extraction
 window.</figcaption>
-</figure>
+
 
 <h3> Beam Diagnostic</h3>
 In order to determine the beam current and position in the xy-plane non-destructively, a 4-channel
