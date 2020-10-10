@@ -13,8 +13,8 @@ A newly-installed proton irradiation site at the [Bonn isochronous cyclotron](ht
 
 <h3> Setup </h3>
 <figure>
-  <img src="/figures/Radiation_1.jpg" width="300">
-  <img src="/figures/Radiation_2.jpg" width="300">
+  <img src="figures/Radiation_1.jpg" width="300">
+  <img src="figures/Radiation_2.jpg" width="300">
   <figcaption>Overview of the irradiation site at the high current room of the Bonn isochronus cyclotron. The setup consists of an insulated cooling box on a two-dimensional motor stage which is
 mounted on a custom-made setup table. A liquid nitrogen reservoir is used to cool nitrogen gas which is guided into the
 cooling box.Shown is  the setup in irradiation position, only several centimeters from the extraction
@@ -22,7 +22,7 @@ window.</figcaption>
 </figure>
 
 <h3> Beam Diagnostic</h3>
-<img src="/figures/aufbau.png" width="500">
+<img src="figures/aufbau.png" width="500">
 
 
 [//]: <> In order to determine the beam current and position in the xy-plane non-destructively, a 4-channel secondary electron monitor (SEM) is used.
@@ -31,8 +31,8 @@ After the SEM the Beam goes through a Beam-loss-monitor, which is based on a far
 The beam goes then though an exit window and encounters the device.
 
 <figure>
-  <img src="/figures/beam_current.png" width="300">
-  <img src="/figures/position.png" width="300">
+  <img src="figures/beam_current.png" width="300">
+  <img src="figures/position.png" width="300">
   <figcaption> Shown are the Visualizations of beam data, available in the online monitor tab of the irrad_control GUI using the installed  SEM. The first figure shows the beam current over time while the no beam is extracted. The second figure shows the relative beam position at the location of the SEM.
 </figcaption>
 </figure>
@@ -55,20 +55,20 @@ This equation describes the fluence per complete scan of the respective area, wi
 
 
 <figure>
-  <img src="/figures/xy_stage.png" width="300">
+  <img src="figures/xy_stage.png" width="300">
 </figure>
 Shown is the the schematic scanning procedure, the beam spot (red circle) is moved in a grid over the scanned  area
 , separated into H/∆y rows. The DUT  is placed inside the green
 rectangle, where the scan speed is constant.
 <figure>
-  <img src="/figures/fluence.png" width="500">
+  <img src="figures/fluence.png" width="500">
 </figure>
 Histogram of the fluence per scanned row of one set of irradiated diodes. The proton
 fluence is indicated on the first, the neutron fluence  on the second y-axis. The
 mean fluence over the entire scan area is given by the horizontal line.
 
 <figure>
-  <img src="/figures/kappa_BONN.png" width="500">
+  <img src="figures/kappa_BONN.png" width="500">
 </figure>
 For our 14 MeV protons we determined a hardness factor of 4.1 ±0.6. The blue curve shows the std. deviation of 5 test structures within the same fluence.
 
