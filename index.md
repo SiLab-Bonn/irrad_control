@@ -7,6 +7,7 @@ layout: default
 
 ( Last modified: {{ site.time | date: '%B %d, %Y' }} )
 
+
 <h3> Setup </h3>
 <figure>
   <p align="center">
@@ -58,7 +59,7 @@ rectangle, where the scan speed is constant.
   </a>
 </p>
 </figure>
-Histogram of the fluence per scanned row of one set of irradiated diodes. The proton
+The fluence is measured with 20 to 200 Hz within each row, while one gets ∆y and v from the XY-Stage. Shown is a Histogram of the fluence per scanned row of one set of irradiated diodes. The proton
 fluence is indicated on the first, the neutron fluence  on the second y-axis. The
 mean fluence over the entire scan area is given by the horizontal line.
 <h3> Proton hardness factor </h3>
@@ -82,7 +83,16 @@ For our 14 MeV protons we determined a hardness factor of 4.1 ±0.6. We used thi
 
 In order to determine the beam current and position in the xy-plane non-destructively, a 4-channel secondary electron monitor (SEM) is used.
 In front of the extraction the Beam penetrates a 4-channel secondary electron monitor. The penetration is directly proportional to the beam current. So it is possible to determine the beam current and position in the xy-plane non-destructively.
-After the SEM the Beam goes through a Beam-loss-monitor, which is based on a faraday cup. Through this it is possible to determine the exact beam extraction current, if the beam is displaced.
+After the SEM the Beam goes through a Beam-loss-monitor (BLM), which is based on a faraday cup. Through the BLM, it is possible to determine the exact beam extraction current, if the beam is displaced and it is possible to determine the profile of the Beam by moving the Beam completely on the BLM and by adapting an integral of a gaussian function on the data.
+<p align="center">
+  <a href= "https://raw.githubusercontent.com/SiLab-Bonn/irrad_control/gh-pages/figures/Gausfunktion_hori.png">
+  <img src="figures/Gausfunktion_hori.png" width="300">
+  </a>
+  <a href= "https://raw.githubusercontent.com/SiLab-Bonn/irrad_control/gh-pages/figures/Gausfunktion_vert.png">
+  <img src="figures/Gausfunktion_vert.png" width="300">
+  </a>
+</p>
+
 The beam goes then though an exit window and encounters the device.
 
 <figure>
