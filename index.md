@@ -27,25 +27,11 @@ window.</figcaption>
 <h3> Proton irradiation Characteristics </h3>
 <table class="table">
 <tr> <td> Energies</td><td>14 MeV per nucleon(~12.5 MeV on DUT)</td></tr>
-<tr> <td>
-  </td><td></td></tr>
-<tr> <td>
-  </td><td></td></tr>
-<tr> <td>
-  </td><td></td></tr>
-<tr> <td>
-  </td><td></td></tr>
+<tr> <td>Beam current</td><td> 20 nA - 2 μA</td></tr>
+<tr> <td>Typical beam width</td><td>4/6 mm x/y</td></tr>
+<tr> <td>Temperature at DUT</td><td>19 cm x 11 cm</td></tr>
+<tr> <td>max. DUT thickness (Si)</td><td>300 μm</td></tr>
   </table>
-  
-|         |
-| :------- | :------- |
-| Energies| 14 MeV per nucleon(~12.5 MeV on DUT)|
-|Beam current | 20 nA - 2 μA|
-|Typical beam width| 4/6 mm x/y|
-|Temperature at DUT| -20 to -40 °C|
-|max. dimensions of the DUT |19 cm x 11 cm|
-|max. DUT thickness (Si)|300 μm|  
-
 
 
 
