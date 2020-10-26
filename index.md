@@ -22,6 +22,8 @@ cooling box.Shown is  the setup in irradiation position, only several centimeter
 window.</figcaption>
 </figure>
 </div>
+
+<div class="container d-block">
 <h3> Proton irradiation Characteristics </h3>
 
 |         |
@@ -33,7 +35,7 @@ window.</figcaption>
 |max. dimensions of the DUT |19 cm x 11 cm|
 |max. DUT thickness (Si)|300 μm|  
 
-
+</div>
 
 
 <h3> Fluence Determination </h3>
