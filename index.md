@@ -7,8 +7,9 @@ layout: default
 
 ( Last modified: {{ site.time | date: '%B %d, %Y' }} )
 
-
+<div class="container">
 <h3> Setup </h3>
+
 <figure>
   <p align="center">
     <a href= "https://raw.githubusercontent.com/SiLab-Bonn/irrad_control/gh-pages/figures/Radiation_1.jpg">
@@ -20,6 +21,7 @@ mounted on a custom-made setup table. A liquid nitrogen reservoir is used to coo
 cooling box.Shown is  the setup in irradiation position, only several centimeters from the extraction
 window.</figcaption>
 </figure>
+</div>
 <h3> Proton irradiation Characteristics </h3>
 
 |         |
