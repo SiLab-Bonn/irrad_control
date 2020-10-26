@@ -13,7 +13,7 @@ layout: default
 <figure>
   <p align="center">
     <a href= "https://raw.githubusercontent.com/SiLab-Bonn/irrad_control/gh-pages/figures/Radiation_1.jpg">
-    <img src="figures/Radiation_1.jpg" class="rounded float-left" width="400">
+    <img src="figures/Radiation_1.jpg" class="rounded float-left p-3" width="400">
     </a>
   </p>
   <figcaption>Overview of the irradiation site at the high current room of the Bonn isochronus cyclotron. The setup consists of an insulated cooling box on a two-dimensional motor stage which is
