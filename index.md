@@ -8,12 +8,13 @@ layout: default
 ( Last modified: {{ site.time | date: '%B %d, %Y' }} )
 
 <div class="container">
+  <div class="px-3 my-5">
 <h3> Setup </h3>
 
 <figure>
   <p align="center">
     <a href= "https://raw.githubusercontent.com/SiLab-Bonn/irrad_control/gh-pages/figures/Radiation_1.jpg">
-    <img src="figures/Radiation_1.jpg" class="rounded float-left p-3" width="400">
+    <img src="figures/Radiation_1.jpg" width="400">
     </a>
   </p>
   <figcaption>Overview of the irradiation site at the high current room of the Bonn isochronus cyclotron. The setup consists of an insulated cooling box on a two-dimensional motor stage which is
@@ -21,9 +22,8 @@ mounted on a custom-made setup table. A liquid nitrogen reservoir is used to coo
 cooling box.Shown is  the setup in irradiation position, only several centimeters from the extraction
 window.</figcaption>
 </figure>
-</div>
 
-<div class="container d-block">
+
 <h3> Proton irradiation Characteristics </h3>
 
 |         |
@@ -35,7 +35,7 @@ window.</figcaption>
 |max. dimensions of the DUT |19 cm x 11 cm|
 |max. DUT thickness (Si)|300 μm|  
 
-</div>
+
 
 
 <h3> Fluence Determination </h3>
@@ -111,3 +111,7 @@ The beam goes then though an exit window and encounters the device.
   <figcaption> Shown are the Visualizations of beam data, available in the online monitor tab of the irrad_control GUI using the installed  SEM. The first figure shows the beam current over time while the no beam is extracted. The second figure shows the relative beam position at the location of the SEM.
 </figcaption>
 </figure>
+
+</div>
+
+
