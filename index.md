@@ -8,7 +8,7 @@ layout: default
 ( Last modified: {{ site.time | date: '%B %d, %Y' }} )
 
 <div class="container">
-  <div class="px-3 my-5">
+  <div class="mx-auto w-75 px-3 my-5">
 <h3> Setup </h3>
 
 <figure>
