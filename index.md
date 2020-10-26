@@ -113,5 +113,6 @@ The beam goes then though an exit window and encounters the device.
 </figure>
 
 </div>
+</div>
 
 
