@@ -25,7 +25,18 @@ window.</figcaption>
 
 
 <h3> Proton irradiation Characteristics </h3>
-
+<table class="table">
+<tr> <td> Energies</td><td>14 MeV per nucleon(~12.5 MeV on DUT)</td></tr>
+<tr> <td>
+  </td><td></td></tr>
+<tr> <td>
+  </td><td></td></tr>
+<tr> <td>
+  </td><td></td></tr>
+<tr> <td>
+  </td><td></td></tr>
+  </table>
+  
 |         |
 | :------- | :------- |
 | Energies| 14 MeV per nucleon(~12.5 MeV on DUT)|
