@@ -95,8 +95,8 @@ After the SEM the Beam goes through a Beam-loss-monitor (BLM), which is based on
 </p>
 
 The beam goes then though an exit window and encounters the device.
-
-<figure>
+<div class="container">
+<!<figure>
 <p align="center">
   <a href= "https://raw.githubusercontent.com/SiLab-Bonn/irrad_control/gh-pages/figures/beam_current.png">
   <img src="figures/beam_current.png" class="rounded float-left">
@@ -104,7 +104,8 @@ The beam goes then though an exit window and encounters the device.
   <a href= "https://raw.githubusercontent.com/SiLab-Bonn/irrad_control/gh-pages/figures/position.png">
   <img src="figures/position.png" class="rounded float-right">
   </a>
-</p>
+</p>>
+  </div>
 
   <figcaption> Shown are the Visualizations of beam data, available in the online monitor tab of the irrad_control GUI using the installed  SEM. The first figure shows the beam current over time while the no beam is extracted. The second figure shows the relative beam position at the location of the SEM.
 </figcaption>
