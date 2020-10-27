@@ -46,7 +46,7 @@ This equation describes the fluence per complete scan of the respective area, wi
 <figure>
 <p align="center">
   <a href= "https://raw.githubusercontent.com/SiLab-Bonn/irrad_control/gh-pages/figures/xy_stage.png">
-  <img src="figures/xy_stage.png" width="500">
+  <img src="figures/xy_stage.png" class="img-fluid">
   </a>
 </p>
 </figure>
@@ -56,7 +56,7 @@ rectangle, where the scan speed is constant.
 <figure>
 <p align="center">
   <a href= "https://raw.githubusercontent.com/SiLab-Bonn/irrad_control/gh-pages/figures/fluence.png">
-  <img src="figures/fluence.png" width="600">
+  <img src="figures/fluence.png" class="img-fluid">
   </a>
 </p>
 </figure>
@@ -67,7 +67,7 @@ mean fluence over the entire scan area is given by the horizontal line.
 <figure>
 <p align="center">
   <a href= "https://raw.githubusercontent.com/SiLab-Bonn/irrad_control/gh-pages/figures/kappa_BONN.png">
-  <img src="figures/kappa_BONN.png" width="500">
+  <img src="figures/kappa_BONN.png" class="img-fluid">
   </a>
 </p>
 </figure>
@@ -78,7 +78,7 @@ For our 14 MeV protons we determined a hardness factor of 4.1 ±0.6. We used thi
 <h3> Beam Diagnostic</h3>
 <p align="center">
   <a href= "https://raw.githubusercontent.com/SiLab-Bonn/irrad_control/gh-pages/figures/aufbau.png">
-  <img src="figures/aufbau.png" width="500">
+  <img src="figures/aufbau.png" class="img-fluid">
   </a>
 </p>
 
