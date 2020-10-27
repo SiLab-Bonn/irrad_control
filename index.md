@@ -85,14 +85,18 @@ For our 14 MeV protons we determined a hardness factor of 4.1 ±0.6. We used thi
 In order to determine the beam current and position in the xy-plane non-destructively, a 4-channel secondary electron monitor (SEM) is used.
 In front of the extraction the Beam penetrates a 4-channel secondary electron monitor. The penetration is directly proportional to the beam current. So it is possible to determine the beam current and position in the xy-plane non-destructively.
 After the SEM the Beam goes through a Beam-loss-monitor (BLM), which is based on a faraday cup. Through the BLM, it is possible to determine the exact beam extraction current, if the beam is displaced and it is possible to determine the profile of the Beam by moving the Beam completely on the BLM and by adapting an integral of a gaussian function on the data.
-<p align="center">
-  <a href= "https://raw.githubusercontent.com/SiLab-Bonn/irrad_control/gh-pages/figures/Gausfunktion_hori.png">
-  <img src="figures/Gausfunktion_hori.png" class="img-fluid">
-  </a>
-  <a href= "https://raw.githubusercontent.com/SiLab-Bonn/irrad_control/gh-pages/figures/Gausfunktion_vert.png">
-  <img src="figures/Gausfunktion_vert.png" class="img-fluid">
-  </a>
-</p>
+<div class="row">
+  <div class="column">
+    <a href= "https://raw.githubusercontent.com/SiLab-Bonn/irrad_control/gh-pages/figures/Gausfunktion_hori.png">
+    <img src="figures/Gausfunktion_hori.png" style="width:100%">
+    </a>
+  </div>
+  <div class="column">
+    <a href= "https://raw.githubusercontent.com/SiLab-Bonn/irrad_control/gh-pages/figures/Gausfunktion_vert.png">
+    <img src="figures/Gausfunktion_vert.png" style="width:100%">
+    </a>
+  </div>
+</div>
 
 The beam goes then though an exit window and encounters the device.
 <div class="row">
