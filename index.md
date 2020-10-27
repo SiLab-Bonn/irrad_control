@@ -87,10 +87,10 @@ In front of the extraction the Beam penetrates a 4-channel secondary electron mo
 After the SEM the Beam goes through a Beam-loss-monitor (BLM), which is based on a faraday cup. Through the BLM, it is possible to determine the exact beam extraction current, if the beam is displaced and it is possible to determine the profile of the Beam by moving the Beam completely on the BLM and by adapting an integral of a gaussian function on the data.
 <p align="center">
   <a href= "https://raw.githubusercontent.com/SiLab-Bonn/irrad_control/gh-pages/figures/Gausfunktion_hori.png">
-  <img src="figures/Gausfunktion_hori.png" width="300">
+  <img src="figures/Gausfunktion_hori.png" class="img-fluid">
   </a>
   <a href= "https://raw.githubusercontent.com/SiLab-Bonn/irrad_control/gh-pages/figures/Gausfunktion_vert.png">
-  <img src="figures/Gausfunktion_vert.png" width="300">
+  <img src="figures/Gausfunktion_vert.png" class="img-fluid">
   </a>
 </p>
 
@@ -99,10 +99,10 @@ The beam goes then though an exit window and encounters the device.
 <figure>
 <p align="center">
   <a href= "https://raw.githubusercontent.com/SiLab-Bonn/irrad_control/gh-pages/figures/beam_current.png">
-  <img src="figures/beam_current.png" width="300">
+  <img src="figures/beam_current.png" class="img-fluid">
   </a>
   <a href= "https://raw.githubusercontent.com/SiLab-Bonn/irrad_control/gh-pages/figures/position.png">
-  <img src="figures/position.png" width="300">
+  <img src="figures/position.png" class="img-fluid">
   </a>
 </p>
   <figcaption> Shown are the Visualizations of beam data, available in the online monitor tab of the irrad_control GUI using the installed  SEM. The first figure shows the beam current over time while the no beam is extracted. The second figure shows the relative beam position at the location of the SEM.
