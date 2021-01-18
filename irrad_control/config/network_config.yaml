@@ -5,6 +5,6 @@ server:
     131.220.163.208: Server_2
     131.220.221.241: Hochstromraum2
     131.220.221.84: free_ip_1
-    131.220.221.98: Hochstromraum
+    131.220.221.217: Hochstromraum
     131.220.221.99: Replacement2
   default: 131.220.221.241
