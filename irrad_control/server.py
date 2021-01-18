@@ -171,7 +171,9 @@ class IrradServer(DAQProcess):
         try:
             # Init stage
             self.xy_stage = ZaberXYStage(serial_port='/dev/ttyUSB0')  # TODO: pass port as arg in device setup
+            self.xy_stage.x_axis.send('set system.access 2')  # Invert x-axis due to current setup
             self.xy_stage.x_axis.send('set encoder.dir 1')  # Invert x-axis due to current setup
+            self.xy_stage.x_axis.send('set system.access 1')  # Invert x-axis due to current setup
 
             # Setup zmq for the stage to publish data
             self.xy_stage.setup_zmq(ctx=self.context, skt=self.socket_type['data'], addr=self._internal_sub_addr, sender=self.server)
