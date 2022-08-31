@@ -2,6 +2,10 @@
 Irrad_Control |test-status|
 =============================
 
+Active Development Location Change
+==================================
+Development of ``irrad_control`` has moved to the `cyclotron-bonn organization <https://github.com/cyclotron-bonn/irrad_control>`_
+
 Introduction
 ============
 
